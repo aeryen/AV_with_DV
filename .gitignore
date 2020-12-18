@@ -1,4 +1,8 @@
+cache/
+.ipynb_checkpoints/
+.vscode/
+
 data/
 data_new/
+
 plots/
-.ipynb_checkpoints/

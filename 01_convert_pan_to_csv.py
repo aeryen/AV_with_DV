@@ -174,6 +174,8 @@ def convert_pan14_novel():
 
     pan_data14.get_train().to_csv(PATH_CLS / 'train_novels.csv', header=True, index=False)
     pan_data14.get_test().to_csv(PATH_CLS / 'test02_novels.csv', header=True, index=False)
+    pan_data14.get_train().to_pickle(PATH_CLS / 'train_essays.pickle')
+    pan_data14.get_test().to_pickle(PATH_CLS / 'test02_essays.pickle')
 
     print("ok")
 
