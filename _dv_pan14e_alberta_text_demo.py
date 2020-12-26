@@ -16,7 +16,7 @@ tokenizer = RobertaTokenizer.from_pretrained("roberta-base")
 # model = BertForMaskedLM.from_pretrained('bert-base-uncased')
 model = RobertaForMaskedLM.from_pretrained('roberta-base')
 _ = model.eval()
-model.to('cuda:6')
+_ = model.to('cuda:6')
 
 #%%
 text = "Assesing ones strengths and weaknesses in any situation is a hard task." + \
@@ -26,6 +26,7 @@ text = "Assesing ones strengths and weaknesses in any situation is a hard task."
 encoded_text = tokenizer(text)
 
 #%%
+# TEXT COMPARISON TEST
 mask_tensors = torch.tensor([encoded_text["attention_mask"]]).to('cuda:6')
 
 recov_text = tokenizer.convert_ids_to_tokens(encoded_text["input_ids"][1:-1])
@@ -47,4 +48,5 @@ for i in range(1, len(encoded_text["input_ids"])-1):
 
 print( " ".join(pred_text) )
 
+        
 # %%
