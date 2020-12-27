@@ -1,7 +1,7 @@
 import os
-from fastai.text import *
-import textacy
-
+import re
+from pathlib import Path
+import pandas as pd
 
 class PANData(object):
     re1 = re.compile(r'  +')
@@ -90,9 +90,9 @@ class PANData(object):
         return result
 
     def fixup(self, x):
-        x = x.replace("\n", " xcrlfx ")
+        # x = x.replace("\n", " xcrlfx ")
         # x = self.re2.sub(r" \1 ", x)
-        x = x.encode("ascii", "ignore").decode("utf-8") 
+        x = x.encode("ascii", "ignore").decode("utf-8")
         # x = textacy.preprocess_text(x, fix_unicode=True, transliterate=True)
         # x = self.re1.sub(' ', x)
         return x
@@ -125,7 +125,7 @@ class PANData(object):
 
 
 def convert_pan13():
-    PATH_CLS = Path('./data_new/pan_13_cls/')
+    PATH_CLS = Path('./data_pickle_trfm/pan_13_cls/')
     PATH_CLS.mkdir(exist_ok=True)
 
     pan_data13 = PANData(year="13", train_split=["pan13_train"], test_split=["pan13_test01"], known_as="str")
@@ -133,16 +133,18 @@ def convert_pan13():
     # pan_data13.get_train().to_csv(PATH_CLS / 'train.csv', header=True, index=False)
     # pan_data13.get_test().to_csv(PATH_CLS / 'test01.csv', header=True, index=False)
     pan_data13.get_train().to_pickle(PATH_CLS / 'train.pickle')
-    pan_data13.get_test().to_pickle(PATH_CLS / 'test02.pickle')
+    pan_data13.get_test().to_pickle(PATH_CLS / 'test01.pickle')
 
     pan_data13 = PANData(year="13", train_split=["pan13_train"], test_split=["pan13_test02"], known_as="str")
     # pan_data13.get_test().to_csv(PATH_CLS / 'test02.csv', header=True, index=False)
+
+    pan_data13.get_test().to_pickle(PATH_CLS / 'test02.pickle')
 
     print("ok")
 
 
 def convert_pan14_essay():
-    PATH_CLS = Path('data_new/pan_14e_cls/')
+    PATH_CLS = Path('data_pickle_trfm/pan_14e_cls/')
     PATH_CLS.mkdir(exist_ok=True)
 
     pan_data14 = PANData(year="14",
@@ -165,15 +167,15 @@ def convert_pan14_essay():
 
 
 def convert_pan14_novel():
-    PATH_CLS = Path('data_new/pan_14n_cls/')
+    PATH_CLS = Path('data_pickle_trfm/pan_14n_cls/')
     PATH_CLS.mkdir(exist_ok=True)
 
     pan_data14 = PANData(year="14",
                          train_split=["pan14_train_english-novels"],
                          test_split=["pan14_test02_english-novels"], known_as="str")
 
-    pan_data14.get_train().to_csv(PATH_CLS / 'train_novels.csv', header=True, index=False)
-    pan_data14.get_test().to_csv(PATH_CLS / 'test02_novels.csv', header=True, index=False)
+    # pan_data14.get_train().to_csv(PATH_CLS / 'train_novels.csv', header=True, index=False)
+    # pan_data14.get_test().to_csv(PATH_CLS / 'test02_novels.csv', header=True, index=False)
     pan_data14.get_train().to_pickle(PATH_CLS / 'train_essays.pickle')
     pan_data14.get_test().to_pickle(PATH_CLS / 'test02_essays.pickle')
 
@@ -181,7 +183,7 @@ def convert_pan14_novel():
 
 
 def convert_pan15():
-    PATH_CLS = Path('data_new/pan_15_cls/')
+    PATH_CLS = Path('data_pickle_trfm/pan_15_cls/')
     PATH_CLS.mkdir(exist_ok=True)
 
     pan_data15 = PANData(year="15", train_split=["pan15_train"], test_split=["pan15_test"])
@@ -195,7 +197,6 @@ def convert_pan15():
 
 
 if __name__ == "__main__":
-    os.chdir("./AV_with_DV/")
     convert_pan13()
     convert_pan14_essay()
     convert_pan14_novel()

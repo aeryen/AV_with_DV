@@ -3,7 +3,7 @@ cache/
 .vscode/
 
 data/
-data_new/
+data_*/
 
 saves/
 plots/

@@ -118,3 +118,6 @@ pred
 # %%
 np.sum( pred == truth ) / len(truth)
 # %%
+truth = df_test02.iloc[:,0].to_numpy() == "Y"
+truth
+# %%
