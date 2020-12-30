@@ -11,6 +11,7 @@ import numpy as np
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 
@@ -22,6 +23,8 @@ from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import Callback, ModelCheckpoint
 from pytorch_lightning.utilities.distributed import rank_zero_only
 
+from pytorch_lightning.metrics.classification import Accuracy
+
 #%%
 class PANDataset(Dataset):
 
@@ -32,33 +35,88 @@ class PANDataset(Dataset):
         return len(self.df)
 
     def __getitem__(self, idx):
-        return (self.df.iloc[idx,0], self.df.iloc[idx,1][0], self.df.iloc[idx,2] )
+        return (self.df.iloc[idx,0], self.df.iloc[idx,1][0], self.df.iloc[idx,2])
 
 class TokenizerCollate:
-    def __init__(self):
-        self.tkz = RobertaTokenizer.from_pretrained("roberta-base")
+    def __init__(self, tkz):
+        self.tkz = tkz
     
     def __call__(self, batch):
         batch_split = list(zip(*batch))
-        labels, unknown, known = batch_split[0], batch_split[1], batch_split[2]
+        labels, known, unknown = batch_split[0], batch_split[1], batch_split[2]
         labels = np.array(labels) == "Y"
-        encode_unk = self.tkz(list(unknown), truncation=True, padding="max_length", max_length=256)
         encode_kno = self.tkz(list(known), truncation=True, padding="max_length", max_length=256)
-        return torch.tensor(labels), torch.tensor(encode_unk["input_ids"]), torch.tensor(encode_unk["attention_mask"]), \
-                torch.tensor(encode_kno["input_ids"]), torch.tensor(encode_kno["attention_mask"])
+        encode_unk = self.tkz(list(unknown), truncation=True, padding="max_length", max_length=256)
+        return torch.tensor(labels), \
+                torch.tensor(encode_kno["input_ids"], dtype=torch.int64), \
+                torch.tensor(encode_kno["attention_mask"], dtype=torch.int64), \
+                torch.tensor(encode_unk["input_ids"], dtype=torch.int64), \
+                torch.tensor(encode_unk["attention_mask"], dtype=torch.int64)
 
+# dataset_train = PANDataset('./data_pickle_trfm/pan_14e_cls/train_essays.pickle')
+# collator = TokenizerCollate()
+# dl = DataLoader(dataset_train,
+#             batch_size=4,
+#             collate_fn=collator,
+#             num_workers=0,
+#             pin_memory=True, drop_last=False, shuffle=False)
 
-dataset_train = PANDataset('./data_pickle_trfm/pan_14e_cls/train_essays.pickle')
-collator = TokenizerCollate()
-dl = DataLoader(dataset_train,
-            batch_size=4,
-            collate_fn=collator,
-            num_workers=0,
-            pin_memory=True, drop_last=False, shuffle=False)
+# batch = next(iter(dl))
+# collator.tkz.convert_ids_to_tokens(batch[1][0,:])
 
-batch = next(iter(dl))
 # %%
-collator.tkz.convert_ids_to_tokens(batch[1][0,:])
+class DVProjectionHead(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+        self.ln1 = nn.LayerNorm(768, eps=1e-05)
+        self.drop1 = nn.Dropout(p=0.5, inplace=True)
+        self.proj1 = nn.Linear(768, 12)
+
+        self.dense2 = nn.Linear(12, 1)
+        self.bias = nn.Parameter(torch.Tensor(1))
+
+        self.avg = AverageEmbedding()
+
+    def forward(self, kno_dv, kno_mask, unk_dv, unk_mask):
+        # dv = [batch, seq_len, 768]
+
+        kno_dv_proj = self.proj1( self.drop1( self.ln1(kno_dv) ) )
+        unk_dv_proj = self.proj1( self.drop1( self.ln1(unk_dv) ) )
+        # dv_proj = [batch, seq_len, 12]
+        
+        # along seq_len dim
+        kno_dv_proj = self.avg(kno_dv_proj, kno_mask)
+        unk_dv_proj = self.avg(unk_dv_proj, unk_mask)
+        # kno_dv_proj = [batch, 12]
+
+        # kno_dv_proj = torch.square(kno_dv_proj) # element-wise square to flip dist to positive
+        # dv_dist = unk_dv_proj - kno_dv_proj
+        dv_dist = F.cosine_similarity(kno_dv_proj, unk_dv_proj)
+        dv_dist = dv_dist + self.bias
+        # dv_dist = [batch]
+
+        return dv_dist
+
+class AverageEmbedding(torch.nn.Module):
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, embedding: torch.Tensor, mask: torch.Tensor):
+        embedding = embedding * mask.unsqueeze(-1).float()
+        embedding = embedding.sum(1)
+
+        lengths = mask.long().sum(-1)
+        length_mask = (lengths > 0)
+        # Set any length 0 to 1, to avoid dividing by zero.
+        lengths = torch.max(lengths, lengths.new_ones(1))
+        # normalize by length
+        embedding = embedding / lengths.unsqueeze(-1).float()
+        # set those with 0 mask to all zeros, i think
+        embedding = embedding * (length_mask > 0).float().unsqueeze(-1)
+
+        return embedding
 
 # %%
 class LightningLongformerCLS(pl.LightningModule):
@@ -70,9 +128,17 @@ class LightningLongformerCLS(pl.LightningModule):
         _ = self.roberta.eval()
         for param in self.roberta.parameters():
             param.requires_grad = False
+        
+        self.pred_model = self.roberta.roberta
+        self.enc_model = self.pred_model.embeddings.word_embeddings
+        self.proj_head = DVProjectionHead()
 
-        self.lossfunc = MultiLabelCEL()
-        self.metrics = torch.nn.ModuleList( [AspectACC(aspect=i) for i in range(6)] )
+        self.tkz = RobertaTokenizer.from_pretrained("roberta-base")
+        self.collator = TokenizerCollate(self.tkz)
+
+        self.lossfunc = nn.BCEWithLogitsLoss()
+
+        self.acc = Accuracy(threshold=0.0)
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.train_config["learning_rate"])
@@ -80,108 +146,150 @@ class LightningLongformerCLS(pl.LightningModule):
         return optimizer
 
     def train_dataloader(self):
-        dataset_train = PANDataset('./data_pickle_trfm/pan_14e_cls/train_essays.pickle')
+        self.dataset_train = PANDataset('./data_pickle_trfm/pan_14e_cls/train_essays.pickle')
         self.loader_train = DataLoader(self.dataset_train,
                                         batch_size=self.train_config["batch_size"],
-                                        collate_fn=self.tokenCollate,
+                                        collate_fn=self.collator,
                                         num_workers=2,
                                         pin_memory=True, drop_last=False, shuffle=True)
         return self.loader_train
 
     def val_dataloader(self):
-        dataset_train = PANDataset('./data_pickle_trfm/pan_14e_cls/test01_essays.pickle')
+        self.dataset_val = PANDataset('./data_pickle_trfm/pan_14e_cls/test01_essays.pickle')
         self.loader_val = DataLoader(self.dataset_val,
                                         batch_size=self.train_config["batch_size"],
-                                        collate_fn=self.tokenCollate,
+                                        collate_fn=self.collator,
                                         num_workers=2,
                                         pin_memory=True, drop_last=False, shuffle=True)
         return self.loader_val
 
     def test_dataloader(self):
-        self.dataset_test = ReviewDataset("../../data/hotel_balance_LengthFix1_3000per/df_test.pickle")
+        self.dataset_test = PANDataset('./data_pickle_trfm/pan_14e_cls/test02_essays.pickle')
         self.loader_test = DataLoader(self.dataset_test,
                                         batch_size=self.train_config["batch_size"],
-                                        collate_fn=self.tokenCollate,
+                                        collate_fn=self.collator,
                                         num_workers=0,
                                         pin_memory=True, drop_last=False, shuffle=False)
         return self.loader_test
     
 #     @autocast()
-    def forward(self, input_ids, attention_mask, labels):
-        logits,outputs,aspect_doc = self.longformer(input_ids=input_ids, attention_mask=attention_mask)
+    def forward(self, inputs):
+        def one_doc_embed(input_ids, input_mask, mask_n=1):
+            embed = self.enc_model(input_ids)
+
+            result_embed = []
+            result_pred = []
+            # skip start and end symbol
+            masked_ids = input_ids.clone()
+            for i in range(1, input_ids.shape[1]-mask_n):
+                masked_ids[:,i:(i+mask_n)] = self.tkz.mask_token_id
+
+                output = self.pred_model(input_ids=masked_ids, attention_mask=input_mask, return_dict=False)[0]
+                result_embed.append( embed[:, i:(i+mask_n), :] )
+                result_pred.append( output[:, i:(i+mask_n), :] )
+
+                masked_ids[:,i:(i+mask_n)] = input_ids[:,i:(i+mask_n)]
+
+            # stack along doc_len
+            result_embed = torch.cat(result_embed, dim=1)
+            result_pred = torch.cat(result_pred, dim=1)
+            return result_embed, result_pred
+
+        labels, kno_ids, kno_mask, unk_ids, unk_mask = inputs
+
+        kno_embed, kno_pred = one_doc_embed(input_ids=kno_ids, input_mask=kno_mask)
+        unk_embed, unk_pred = one_doc_embed(input_ids=unk_ids, input_mask=unk_mask)
+
+        kno_dv = kno_pred - kno_embed
+        unk_dv = unk_pred - unk_embed
+
+        logits = self.proj_head(kno_dv, kno_mask[:,1:-1], unk_dv, unk_mask[:,1:-1])
+
+        labels = labels.float()
         loss = self.lossfunc(logits, labels)
 
-        return (loss, logits, outputs, aspect_doc)
+        return (loss, logits, (kno_embed, kno_pred, unk_embed, unk_pred))
     
     def training_step(self, batch, batch_idx):
-        input_ids, mask, label  = batch[0].type(torch.int64), batch[1].type(torch.int64), batch[2].type(torch.int64)
+        labels, kno_ids, kno_mask, unk_ids, unk_mask  = batch
         
-        loss, logits, outputs, aspect_doc = self(input_ids=input_ids, attention_mask=mask, labels=label)
+        loss, logits, outputs = self( (labels, kno_ids, kno_mask, unk_ids, unk_mask) )
         
         self.log("train_loss", loss)
         
         return loss
 
-    def on_after_backward(self):
-        self.log("learning_rate", self.trainer.optimizers[0].param_groups[0]['lr'] )
-        with torch.no_grad():
-            if (model.longformer.longformer.embeddings.word_embeddings.weight.grad is not None):
-                norm_value = model.longformer.longformer.embeddings.word_embeddings.weight.grad.detach().norm(2).item()
-                self.log('NORMS/embedding norm', norm_value)
-
-            for i in [0, 4, 8, 11]:
-                if (model.longformer.longformer.encoder.layer[i].output.dense.weight.grad is not None):
-                    norm_value = model.longformer.longformer.encoder.layer[i].output.dense.weight.grad.detach().norm(2).item()
-                    self.log('NORMS/encoder %d output norm' % i, norm_value)
-
-            if (self.longformer.classifier.aspect_projector[2].weight.grad is not None):
-                norm_value = self.longformer.classifier.aspect_projector[2].weight.grad.detach().norm(2).item()
-                self.log("NORMS/aspect_projector", norm_value)
-
-            if (self.longformer.classifier.senti_projector[2].weight.grad is not None):
-                norm_value = self.longformer.classifier.senti_projector[2].weight.grad.detach().norm(2).item()
-                self.log("NORMS/senti_projector", norm_value)
-
-            if (self.longformer.classifier.aspect[2].weight.grad is not None):
-                norm_value = self.longformer.classifier.aspect[2].weight.grad.detach().norm(2).item()
-                self.log("NORMS/aspect", norm_value)
-
-            if (self.longformer.classifier.sentiment[2].weight.grad is not None):
-                norm_value = self.longformer.classifier.sentiment[2].weight.grad.detach().norm(2).item()
-                self.log("NORMS/sentiments", norm_value)
-
     def validation_step(self, batch, batch_idx):
-        input_ids, mask, label  = batch[0].type(torch.int64), batch[1].type(torch.int64), batch[2].type(torch.int64)
+        labels, kno_ids, kno_mask, unk_ids, unk_mask  = batch
         
-        loss, logits, outputs, aspect_doc = self(input_ids=input_ids, attention_mask=mask, labels=label)
+        loss, logits, outputs = self( (labels, kno_ids, kno_mask, unk_ids, unk_mask) )
         
-        # self.log('val_loss', loss, on_step=False, on_epoch=True, reduce_fx=torch.mean, prog_bar=False)
-        accs = [m(logits, label) for m in self.metrics]  # update metric counters
+        self.acc(logits, labels.float())
         
         return {"val_loss": loss}
     
     def validation_epoch_end(self, validation_step_outputs):
         avg_loss = torch.stack([x['val_loss'] for x in validation_step_outputs]).mean()
         self.log("val_loss", avg_loss)
+        self.log('eval accuracy', self.acc.compute())
 
-        for i,m in enumerate(self.metrics):
-            self.log('acc'+str(i), m.compute())
+    # def on_test_epoch_start(self):
+    #     self.test_logit_outputs = []
+    #     self.test_aspect_outputs = []
 
-    def on_test_epoch_start(self):
-        self.test_logit_outputs = []
-        self.test_aspect_outputs = []
-
-    def test_step(self, batch, batch_idx):
-        input_ids, mask, label  = batch[0].type(torch.int64), batch[1].type(torch.int64), batch[2].type(torch.int64)
+    # def test_step(self, batch, batch_idx):
+    #     input_ids, mask, label  = batch[0].type(torch.int64), batch[1].type(torch.int64), batch[2].type(torch.int64)
         
-        loss, logits, outputs, aspect_doc = self(input_ids=input_ids, attention_mask=mask, labels=label)
-        accs = [m(logits, label) for m in self.metrics]  # update metric counters
+    #     loss, logits, outputs, aspect_doc = self(input_ids=input_ids, attention_mask=mask, labels=label)
+    #     accs = [m(logits, label) for m in self.metrics]  # update metric counters
 
-        self.test_logit_outputs.append(logits)
-        self.test_aspect_outputs.extend(aspect_doc)
+    #     self.test_logit_outputs.append(logits)
+    #     self.test_aspect_outputs.extend(aspect_doc)
         
-        return loss
+    #     return loss
 
-    def on_test_epoch_end(self):
-        for i,m in enumerate(self.metrics):
-            print('acc'+str(i), m.compute())
+    # def on_test_epoch_end(self):
+    #     for i,m in enumerate(self.metrics):
+    #         print('acc'+str(i), m.compute())
+
+
+# %%
+# _ = model.to("cuda:6")
+# %%
+# train_dl = model.train_dataloader()
+# batch = next(iter(train_dl))
+# for i in range(len(batch)):
+#     batch[i] = batch[i].to("cuda:6")
+# output = model(batch)
+# %%
+if __name__ == "__main__":
+    train_config = {}
+    train_config["cache_dir"] = "./cache/"
+    train_config["epochs"] = 16
+    train_config["batch_size"] = 8
+    # train_config["accumulate_grad_batches"] = 12
+    train_config["gradient_clip_val"] = 1.5
+    train_config["learning_rate"] = 1e-4
+
+    pl.seed_everything(42)
+
+    wandb_logger = WandbLogger(name='first_projection',project='AVDV')
+    model = LightningLongformerCLS(train_config)
+    trainer = pl.Trainer(max_epochs=train_config["epochs"],
+                        # accumulate_grad_batches=train_config["accumulate_grad_batches"],
+                        accumulate_grad_batches=1,
+                        gradient_clip_val=train_config["gradient_clip_val"],
+
+                        gpus=[6],
+                        num_nodes=1,
+
+                        # amp_backend='native',
+                        # precision=16,
+
+                        logger=wandb_logger,
+                        log_every_n_steps=1,
+
+                        limit_val_batches=500,
+                        )
+
+    trainer.fit(model)

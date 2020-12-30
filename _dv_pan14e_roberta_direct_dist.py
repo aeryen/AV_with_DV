@@ -48,22 +48,25 @@ for i in range(1, len(encoded_text["input_ids"])-1):
         outputs = pred_model(input_ids=masked_ids, attention_mask=input_mask, return_dict=False)[0]
         
 #%%
-def one_doc_embed(enc_model, pred_model, input_ids, input_mask, mask_n):
+def one_doc_embed(enc_model, pred_model, input_ids, input_mask, mask_n=1):
     with torch.no_grad():
-        embed = enc_model(input_ids)[0,1:-1,:].detach()  # remove start and end symbol
+        embed = enc_model(input_ids).detach()  # remove start and end symbol
 
         result_embed = []
         result_pred = []
-        for i in range(1, len(encoded_text["input_ids"])-1-mask_n):
+        for i in range(1, len(encoded_text["input_ids"])-mask_n):
             masked_ids = input_ids.clone()
             masked_ids[0,i:(i+mask_n)] = tokenizer.mask_token_id
 
             output = pred_model(input_ids=masked_ids, attention_mask=input_mask, return_dict=False)[0]
-            result_embed.append( embed[i:(i+mask_n),:] )
-            result_pred.append(output[0,i:(i+mask_n),:].detach())
 
-        result_embed = torch.cat(result_embed, dim=0)
-        result_pred = torch.cat(result_pred, dim=0)
+            embed_vec = torch.mean( embed[0, i:(i+mask_n), :] , dim=0)
+            result_embed.append( embed_vec )
+            pred_vec = torch.mean( output[0, i:(i+mask_n), :].detach(), dim=0)
+            result_pred.append( pred_vec )
+
+        result_embed = torch.stack(result_embed, dim=0)
+        result_pred = torch.stack(result_pred, dim=0)
         return {"e": result_embed, "p": result_pred}
 
 # %%
@@ -113,6 +116,7 @@ result
 # %%
 pred = result > np.median(result)
 pred
+
 # %%
 # %%
 truth = df_test02.iloc[:,0].to_numpy() == "Y"

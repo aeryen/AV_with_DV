@@ -1,0 +1,24 @@
+{
+    "os": "Linux-5.4.0-56-generic-x86_64-with-glibc2.31",
+    "python": "3.9.1",
+    "heartbeatAt": "2020-12-30T03:42:09.551393",
+    "startedAt": "2020-12-30T03:42:08.620163",
+    "docker": null,
+    "gpu": "TITAN RTX",
+    "gpu_count": 7,
+    "cpu_count": 48,
+    "cuda": null,
+    "args": [],
+    "state": "running",
+    "codePath": "_dv_pan14e_roberta_projmodel.py",
+    "program": "/disk2/yifan/code/AV_with_DV/_dv_pan14e_roberta_projmodel.py",
+    "git": {
+        "remote": "https://github.com/aeryen/AV_with_DV.git",
+        "commit": "7184f40295a37cca81c9d3d4eb02fe7873fe212a"
+    },
+    "email": "aeryen@gmail.com",
+    "root": "/disk2/yifan/code/AV_with_DV",
+    "host": "arjun-server1",
+    "username": "yifan",
+    "executable": "/home/yifan/anaconda3/envs/avdv/bin/python"
+}
