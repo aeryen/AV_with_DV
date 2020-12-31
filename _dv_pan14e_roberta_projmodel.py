@@ -291,7 +291,7 @@ if __name__ == "__main__":
     train_config = {}
     train_config["cache_dir"] = "./cache/"
     train_config["epochs"] = 16
-    train_config["batch_size"] = 64
+    train_config["batch_size"] = 256
     # train_config["accumulate_grad_batches"] = 12
     train_config["gradient_clip_val"] = 1.5
     train_config["learning_rate"] = 1e-4
