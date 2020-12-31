@@ -308,14 +308,16 @@ if __name__ == "__main__":
 
                         gpus=[6],
                         num_nodes=1,
+                        # accelerator='ddp',
+                        # plugins='ddp_sharded',
 
-                        # amp_backend='native',
-                        # precision=16,
+                        amp_backend='native',
+                        precision=16,
 
                         logger=wandb_logger,
                         log_every_n_steps=1,
 
-                        limit_val_batches=80,
+                        limit_val_batches=40,
                         checkpoint_callback=cp_valloss
                         )
 
