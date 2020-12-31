@@ -23,7 +23,7 @@ from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import Callback, ModelCheckpoint
 from pytorch_lightning.utilities.distributed import rank_zero_only
 
-from pytorch_lightning.metrics.classification import Accuracy
+from pytorch_lightning.metrics.classification import Accuracy, F1
 
 #%%
 class PANDataset(Dataset):
@@ -35,7 +35,8 @@ class PANDataset(Dataset):
         return len(self.df)
 
     def __getitem__(self, idx):
-        return (self.df.iloc[idx,0], self.df.iloc[idx,1][0], self.df.iloc[idx,2])
+        # return (self.df.iloc[idx,0], self.df.iloc[idx,1][0], self.df.iloc[idx,2])
+        return (self.df.iloc[idx,0], self.df.iloc[idx,1], self.df.iloc[idx,2])
 
 class TokenizerCollate:
     def __init__(self, tkz):
@@ -45,24 +46,27 @@ class TokenizerCollate:
         batch_split = list(zip(*batch))
         labels, known, unknown = batch_split[0], batch_split[1], batch_split[2]
         labels = np.array(labels) == "Y"
-        encode_kno = self.tkz(list(known), truncation=True, padding="max_length", max_length=256)
-        encode_unk = self.tkz(list(unknown), truncation=True, padding="max_length", max_length=256)
+        encode_kno = self.tkz(list(known), truncation=True, padding="max_length", max_length=128)
+        encode_unk = self.tkz(list(unknown), truncation=True, padding="max_length", max_length=128)
         return torch.tensor(labels), \
                 torch.tensor(encode_kno["input_ids"], dtype=torch.int64), \
                 torch.tensor(encode_kno["attention_mask"], dtype=torch.int64), \
                 torch.tensor(encode_unk["input_ids"], dtype=torch.int64), \
                 torch.tensor(encode_unk["attention_mask"], dtype=torch.int64)
-
-# dataset_train = PANDataset('./data_pickle_trfm/pan_14e_cls/train_essays.pickle')
-# collator = TokenizerCollate()
+                
+# # %%
+# dataset_train = PANDataset('./data_pickle_cutcombo/pan_14e_cls/train_essays.pickle')
+# tkz = RobertaTokenizer.from_pretrained("roberta-base")
+# collator = TokenizerCollate(tkz=tkz)
 # dl = DataLoader(dataset_train,
 #             batch_size=4,
 #             collate_fn=collator,
 #             num_workers=0,
 #             pin_memory=True, drop_last=False, shuffle=False)
-
+# # %%
 # batch = next(iter(dl))
-# collator.tkz.convert_ids_to_tokens(batch[1][0,:])
+# #%%
+# tkz.convert_ids_to_tokens(batch[1][0,:])
 
 # %%
 class DVProjectionHead(nn.Module):
@@ -73,8 +77,8 @@ class DVProjectionHead(nn.Module):
         self.drop1 = nn.Dropout(p=0.5, inplace=True)
         self.proj1 = nn.Linear(768, 12)
 
-        self.dense2 = nn.Linear(12, 1)
-        self.bias = nn.Parameter(torch.Tensor(1))
+        # self.dense2 = nn.Linear(12, 1)
+        self.bias = nn.Parameter( torch.zeros([1]) )
 
         self.avg = AverageEmbedding()
 
@@ -139,6 +143,7 @@ class LightningLongformerCLS(pl.LightningModule):
         self.lossfunc = nn.BCEWithLogitsLoss()
 
         self.acc = Accuracy(threshold=0.0)
+        self.f1 = F1(threshold=0.0)
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.train_config["learning_rate"])
@@ -146,35 +151,45 @@ class LightningLongformerCLS(pl.LightningModule):
         return optimizer
 
     def train_dataloader(self):
-        self.dataset_train = PANDataset('./data_pickle_trfm/pan_14e_cls/train_essays.pickle')
+        self.dataset_train = PANDataset('./data_pickle_cutcombo/pan_14e_cls/train_essays.pickle')
         self.loader_train = DataLoader(self.dataset_train,
                                         batch_size=self.train_config["batch_size"],
                                         collate_fn=self.collator,
-                                        num_workers=2,
-                                        pin_memory=True, drop_last=False, shuffle=True)
+                                        num_workers=4,
+                                        pin_memory=True, drop_last=False, shuffle=False)
         return self.loader_train
 
     def val_dataloader(self):
-        self.dataset_val = PANDataset('./data_pickle_trfm/pan_14e_cls/test01_essays.pickle')
+        self.dataset_val = PANDataset('./data_pickle_cutcombo/pan_14e_cls/test01_essays.pickle')
         self.loader_val = DataLoader(self.dataset_val,
                                         batch_size=self.train_config["batch_size"],
                                         collate_fn=self.collator,
-                                        num_workers=2,
-                                        pin_memory=True, drop_last=False, shuffle=True)
+                                        num_workers=4,
+                                        pin_memory=True, drop_last=False, shuffle=False)
         return self.loader_val
 
     def test_dataloader(self):
-        self.dataset_test = PANDataset('./data_pickle_trfm/pan_14e_cls/test02_essays.pickle')
+        self.dataset_test = PANDataset('./data_pickle_cutcombo/pan_14e_cls/test02_essays.pickle')
         self.loader_test = DataLoader(self.dataset_test,
                                         batch_size=self.train_config["batch_size"],
                                         collate_fn=self.collator,
-                                        num_workers=0,
+                                        num_workers=4,
                                         pin_memory=True, drop_last=False, shuffle=False)
         return self.loader_test
     
 #     @autocast()
     def forward(self, inputs):
         def one_doc_embed(input_ids, input_mask, mask_n=1):
+            uniq_mask = []
+            uniq_input, inverse_indices = torch.unique( input_ids, return_inverse=True, dim=0 )
+            invi = inverse_indices.detach().cpu().numpy()
+            for i in range( uniq_input.shape[0] ):
+                first_index = np.where(invi == i)[0][0]
+                uniq_mask.append(input_mask[first_index,:])
+
+            input_ids = uniq_input
+            input_mask = torch.stack(uniq_mask, dim=0)
+
             embed = self.enc_model(input_ids)
 
             result_embed = []
@@ -193,7 +208,16 @@ class LightningLongformerCLS(pl.LightningModule):
             # stack along doc_len
             result_embed = torch.cat(result_embed, dim=1)
             result_pred = torch.cat(result_pred, dim=1)
-            return result_embed, result_pred
+
+            rec_embed = []
+            rec_pred = []
+            for i in invi:
+                rec_embed.append(result_embed[i,:,:])
+                rec_pred.append(result_pred[i,:,:])
+
+            rec_embed = torch.stack(rec_embed, dim=0)
+            rec_pred = torch.stack(rec_pred, dim=0)
+            return rec_embed, rec_pred
 
         labels, kno_ids, kno_mask, unk_ids, unk_mask = inputs
 
@@ -225,6 +249,7 @@ class LightningLongformerCLS(pl.LightningModule):
         loss, logits, outputs = self( (labels, kno_ids, kno_mask, unk_ids, unk_mask) )
         
         self.acc(logits, labels.float())
+        self.f1(logits, labels.float())
         
         return {"val_loss": loss}
     
@@ -266,7 +291,7 @@ if __name__ == "__main__":
     train_config = {}
     train_config["cache_dir"] = "./cache/"
     train_config["epochs"] = 16
-    train_config["batch_size"] = 8
+    train_config["batch_size"] = 64
     # train_config["accumulate_grad_batches"] = 12
     train_config["gradient_clip_val"] = 1.5
     train_config["learning_rate"] = 1e-4
@@ -275,6 +300,7 @@ if __name__ == "__main__":
 
     wandb_logger = WandbLogger(name='first_projection',project='AVDV')
     model = LightningLongformerCLS(train_config)
+    cp_valloss = ModelCheckpoint(save_top_k=5, monitor='val_loss', mode='min')
     trainer = pl.Trainer(max_epochs=train_config["epochs"],
                         # accumulate_grad_batches=train_config["accumulate_grad_batches"],
                         accumulate_grad_batches=1,
@@ -289,7 +315,8 @@ if __name__ == "__main__":
                         logger=wandb_logger,
                         log_every_n_steps=1,
 
-                        limit_val_batches=500,
+                        limit_val_batches=80,
+                        checkpoint_callback=cp_valloss
                         )
 
     trainer.fit(model)

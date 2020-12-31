@@ -1,8 +1,9 @@
+# %%
 import os
 import re
 from pathlib import Path
 import pandas as pd
-
+# %%
 class PANData(object):
     re1 = re.compile(r'  +')
     re2 = re.compile(r"(\\uf.{3})")
@@ -195,10 +196,12 @@ def convert_pan15():
 
     print("ok")
 
+# %%
 
 if __name__ == "__main__":
-    convert_pan13()
+    # convert_pan13()
     convert_pan14_essay()
-    convert_pan14_novel()
-    convert_pan15()
+    # convert_pan14_novel()
+    # convert_pan15()
 
+# %%

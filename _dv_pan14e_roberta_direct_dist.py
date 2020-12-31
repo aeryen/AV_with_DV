@@ -118,7 +118,6 @@ pred = result > np.median(result)
 pred
 
 # %%
-# %%
 truth = df_test02.iloc[:,0].to_numpy() == "Y"
 truth
 
