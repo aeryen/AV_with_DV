@@ -73,12 +73,19 @@ class DVProjectionHead(nn.Module):
 
     def __init__(self):
         super().__init__()
-        self.ln1 = nn.LayerNorm(768, eps=1e-05)
+        self.ln1 = nn.BatchNorm1d(126)
         self.drop1 = nn.Dropout(p=0.5, inplace=True)
         self.proj1 = nn.Linear(768, 12)
 
-        # self.dense2 = nn.Linear(12, 1)
-        self.bias = nn.Parameter( torch.zeros([1]) )
+        self.ln2 = nn.BatchNorm1d(24)
+        self.drop2 = nn.Dropout(p=0.1, inplace=True)
+        self.dense2 = nn.Linear(24, 24)
+
+        self.ln3 = nn.BatchNorm1d(24)
+        self.drop3 = nn.Dropout(p=0.1, inplace=True)
+        self.dense3 = nn.Linear(24, 1)
+
+        # self.bias = nn.Parameter( torch.zeros([1]) )
 
         self.avg = AverageEmbedding()
 
@@ -94,13 +101,26 @@ class DVProjectionHead(nn.Module):
         unk_dv_proj = self.avg(unk_dv_proj, unk_mask)
         # kno_dv_proj = [batch, 12]
 
+        # method 1, direct cosine
+        # dv_dist = F.cosine_similarity(kno_dv_proj, unk_dv_proj)
+        # dv_dist = dv_dist + self.bias
+
+        # method 2, element-wise distance to tanh to gelu?
         # kno_dv_proj = torch.square(kno_dv_proj) # element-wise square to flip dist to positive
         # dv_dist = unk_dv_proj - kno_dv_proj
-        dv_dist = F.cosine_similarity(kno_dv_proj, unk_dv_proj)
-        dv_dist = dv_dist + self.bias
-        # dv_dist = [batch]
+        
+        # method 3, real NN
+        dv_comb = torch.cat((kno_dv_proj, unk_dv_proj), dim=1) # [batch, 24]
+        dv_comb = F.tanh(dv_comb)
 
-        return dv_dist
+        hidden = self.drop2( self.ln2(dv_comb) )
+        hidden = self.dense2(hidden)
+        hidden = F.tanh(hidden)  # [batch, 24]
+
+        hidden = self.drop3( self.ln3(hidden) )
+        hidden = self.dense3(hidden)  # [batch, 1]
+
+        return hidden
 
 class AverageEmbedding(torch.nn.Module):
 
@@ -160,7 +180,7 @@ class LightningLongformerCLS(pl.LightningModule):
         return self.loader_train
 
     def val_dataloader(self):
-        self.dataset_val = PANDataset('./data_pickle_cutcombo/pan_14e_cls/test01_essays.pickle')
+        self.dataset_val = PANDataset('./data_pickle_cutcombo/pan_14e_cls/test01_essays_onecut.pickle')
         self.loader_val = DataLoader(self.dataset_val,
                                         batch_size=self.train_config["batch_size"],
                                         collate_fn=self.collator,
@@ -169,7 +189,7 @@ class LightningLongformerCLS(pl.LightningModule):
         return self.loader_val
 
     def test_dataloader(self):
-        self.dataset_test = PANDataset('./data_pickle_cutcombo/pan_14e_cls/test02_essays.pickle')
+        self.dataset_test = PANDataset('./data_pickle_cutcombo/pan_14e_cls/test02_essays_onecut.pickle')
         self.loader_test = DataLoader(self.dataset_test,
                                         batch_size=self.train_config["batch_size"],
                                         collate_fn=self.collator,
@@ -229,6 +249,7 @@ class LightningLongformerCLS(pl.LightningModule):
 
         logits = self.proj_head(kno_dv, kno_mask[:,1:-1], unk_dv, unk_mask[:,1:-1])
 
+        logits = torch.squeeze(logits)
         labels = labels.float()
         loss = self.lossfunc(logits, labels)
 
@@ -286,6 +307,13 @@ class LightningLongformerCLS(pl.LightningModule):
 # for i in range(len(batch)):
 #     batch[i] = batch[i].to("cuda:6")
 # output = model(batch)
+
+# %%
+@rank_zero_only
+def wandb_save(wandb_logger):
+    wandb_logger.log_hyperparams(train_config)
+    wandb_logger.experiment.save('./Hotel_Transformer_Baseline.py', policy="now")
+
 # %%
 if __name__ == "__main__":
     train_config = {}
@@ -294,12 +322,15 @@ if __name__ == "__main__":
     train_config["batch_size"] = 256
     # train_config["accumulate_grad_batches"] = 12
     train_config["gradient_clip_val"] = 1.5
-    train_config["learning_rate"] = 1e-4
+    train_config["learning_rate"] = 5e-5
 
     pl.seed_everything(42)
 
     wandb_logger = WandbLogger(name='first_projection',project='AVDV')
+
     model = LightningLongformerCLS(train_config)
+    # model = LightningLongformerCLS.load_from_checkpoint("./AVDV/143ui570/checkpoints/epoch=5-step=1979.ckpt", config=train_config)
+    
     cp_valloss = ModelCheckpoint(save_top_k=5, monitor='val_loss', mode='min')
     trainer = pl.Trainer(max_epochs=train_config["epochs"],
                         # accumulate_grad_batches=train_config["accumulate_grad_batches"],
