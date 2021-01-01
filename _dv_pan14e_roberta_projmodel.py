@@ -100,14 +100,6 @@ class DVProjectionHead(nn.Module):
         kno_dv_proj = self.avg(kno_dv_proj, kno_mask)
         unk_dv_proj = self.avg(unk_dv_proj, unk_mask)
         # kno_dv_proj = [batch, 12]
-
-        # method 1, direct cosine
-        # dv_dist = F.cosine_similarity(kno_dv_proj, unk_dv_proj)
-        # dv_dist = dv_dist + self.bias
-
-        # method 2, element-wise distance to tanh to gelu?
-        # kno_dv_proj = torch.square(kno_dv_proj) # element-wise square to flip dist to positive
-        # dv_dist = unk_dv_proj - kno_dv_proj
         
         # method 3, real NN
         dv_comb = torch.cat((kno_dv_proj, unk_dv_proj), dim=1) # [batch, 24]
@@ -180,7 +172,7 @@ class LightningLongformerCLS(pl.LightningModule):
         return self.loader_train
 
     def val_dataloader(self):
-        self.dataset_val = PANDataset('./data_pickle_cutcombo/pan_14e_cls/test01_essays_onecut.pickle')
+        self.dataset_val = PANDataset('./data_pickle_cutcombo/pan_14e_cls/test02_essays_onecut.pickle')
         self.loader_val = DataLoader(self.dataset_val,
                                         batch_size=self.train_config["batch_size"],
                                         collate_fn=self.collator,
@@ -310,9 +302,9 @@ class LightningLongformerCLS(pl.LightningModule):
 
 # %%
 @rank_zero_only
-def wandb_save(wandb_logger):
+def wandb_save(wandb_logger, train_config):
     wandb_logger.log_hyperparams(train_config)
-    wandb_logger.experiment.save('./Hotel_Transformer_Baseline.py', policy="now")
+    wandb_logger.experiment.save('./_dv_pan14e_roberta_projmodel', policy="now")
 
 # %%
 if __name__ == "__main__":
@@ -327,6 +319,7 @@ if __name__ == "__main__":
     pl.seed_everything(42)
 
     wandb_logger = WandbLogger(name='first_projection',project='AVDV')
+    wandb_save(wandb_logger, train_config)
 
     model = LightningLongformerCLS(train_config)
     # model = LightningLongformerCLS.load_from_checkpoint("./AVDV/143ui570/checkpoints/epoch=5-step=1979.ckpt", config=train_config)
