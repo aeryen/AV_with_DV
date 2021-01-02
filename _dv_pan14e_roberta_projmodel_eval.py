@@ -36,7 +36,9 @@ def eval_model_onecut(model, test_dl):
 
 # %%
 # proj12_nn12-12-1tanh_good
-model = LightningLongformerCLS.load_from_checkpoint("AVDV/239gfgeh/checkpoints/epoch=4-step=1649.ckpt", config=train_config)
+# model = LightningLongformerCLS.load_from_checkpoint("AVDV/239gfgeh/checkpoints/epoch=4-step=1649.ckpt", config=train_config)
+
+model = LightningLongformerCLS.load_from_checkpoint("AVDV/2nimjle3/checkpoints/epoch=2-step=998.ckpt", config=train_config)
 
 # %%
 tkz = RobertaTokenizer.from_pretrained("roberta-base")
@@ -59,19 +61,83 @@ acc = eval_model_onecut(model, dl_14n)
 
 # %%
 def eval_model_wholedoc(model, test_dl):
-    model = model.to("cuda:5")
-    model = model.eval()
-    batch = next(iter(test_dl))
-    batch = [d.to("cuda:5") for d in batch]
+    result = []
     with torch.no_grad():
-        loss, logits, outputs = model(batch)
+        for batch in tqdm(test_dl):
+            batch = [d.to(train_config["gpu_id"]) for d in batch]
+            kno_ids, kno_mask, unk_ids, unk_mask = batch
+            model = model.to(train_config["gpu_id"])
+            model = model.eval()
+            
+            kno_dv = model( (kno_ids, kno_mask) , onedoc_enc=True)
+            unk_dv = model( (unk_ids, unk_mask) , onedoc_enc=True)
 
-    pred = (logits > logits.median()).cpu().numpy()
-    truth = batch[0].cpu().numpy()
+            # logits = model.proj_head(kno_dv, kno_mask[:,1:-1], unk_dv, unk_mask[:,1:-1])
+            kno_dv_proj = model.proj_head.proj1( model.proj_head.drop1( model.proj_head.ln1(kno_dv) ) )
+            unk_dv_proj = model.proj_head.proj1( model.proj_head.drop1( model.proj_head.ln1(unk_dv) ) )
 
-    acc = np.sum( pred == truth ) / len(truth)
+            kno_dv_doc = []
+            kno_mask_doc = []
+            for i in range(kno_dv_proj.shape[0]):
+                kno_dv_doc.append( kno_dv_proj[i:i+1,:,:] )
+                kno_mask_doc.append( kno_mask[i:i+1,1:-1] )
+            kno_dv_doc = torch.cat(kno_dv_doc, dim=1)
+            kno_mask_doc = torch.cat(kno_mask_doc, dim=1)
+
+            unk_dv_doc = []
+            unk_mask_doc = []
+            for i in range(unk_dv_proj.shape[0]):
+                unk_dv_doc.append( unk_dv_proj[i:i+1,:,:] )
+                unk_mask_doc.append( unk_mask[i:i+1,1:-1] )
+            unk_dv_doc = torch.cat(unk_dv_doc, dim=1)
+            unk_mask_doc = torch.cat(unk_mask_doc, dim=1)
+
+            kno_dv_proj = model.proj_head.avg(kno_dv_doc, kno_mask_doc)
+            unk_dv_proj = model.proj_head.avg(unk_dv_doc, unk_mask_doc)
+
+            dv_comb = torch.cat((kno_dv_proj, unk_dv_proj), dim=1) # [batch, 24]
+            dv_comb = torch.tanh(dv_comb)
+
+            hidden = model.proj_head.drop2( model.proj_head.ln2(dv_comb) )
+            hidden = model.proj_head.dense2(hidden)
+            hidden = torch.tanh(hidden)  # [batch, 24]
+
+            hidden = model.proj_head.drop3( model.proj_head.ln3(hidden) )
+            hidden = model.proj_head.dense3(hidden)  # [batch, 1]
+
+            result.append( hidden.item() )
+
+    pred = np.array(result)
+    pred_bol = pred > np.median(pred)
+    truth = ( dataset.df.iloc[:,0] == "Y" ).to_numpy()
+    acc = np.sum( pred_bol == truth ) / len(truth)
     print(acc)
-    return acc
+    return pred, acc
+
+
+def eval_model_cutdist(model, test_dl):
+    result = []
+    with torch.no_grad():
+        for batch in tqdm(test_dl):
+            batch = [d.to(train_config["gpu_id"]) for d in batch]
+            kno_ids, kno_mask, unk_ids, unk_mask = batch
+            model = model.to(train_config["gpu_id"])
+            model = model.eval()
+            
+            kno_dv = model( (kno_ids, kno_mask) , onedoc_enc=True)
+            unk_dv = model( (unk_ids, unk_mask) , onedoc_enc=True)
+
+            dist_val = []
+            # print(kno_dv.shape[0])
+            # print(unk_dv.shape[0])
+            for i in range(kno_dv.shape[0]):
+                for j in range(unk_dv.shape[0]):
+                    logit = model.proj_head( kno_dv[i:i+1,:,:], kno_mask[i:i+1,1:-1],
+                                     unk_dv[j:j+1,:,:], unk_mask[j:j+1,1:-1] )
+                    dist_val.append(logit.item())
+            
+            result.append(dist_val)
+    return result
 
 class OneDocCollate:
     def __init__(self, tkz):
@@ -94,51 +160,36 @@ dl_14e = DataLoader(dataset,
                         num_workers=0, drop_last=False, shuffle=False)
 
 # %%
-result = []
-with torch.no_grad():
-    for batch in tqdm(dl_14e):
-        batch = [d.to("cuda:5") for d in batch]
-        kno_ids, kno_mask, unk_ids, unk_mask = batch
-        model = model.to("cuda:5")
-        model = model.eval()
-        
-        kno_dv = model( (kno_ids, kno_mask) , onedoc_enc=True)
-        unk_dv = model( (unk_ids, unk_mask) , onedoc_enc=True)
+result = eval_model_cutdist(model, dl_14e)
 
-        # logits = model.proj_head(kno_dv, kno_mask[:,1:-1], unk_dv, unk_mask[:,1:-1])
-        kno_dv_proj = model.proj_head.proj1( model.proj_head.drop1( model.proj_head.ln1(kno_dv) ) )
-        unk_dv_proj = model.proj_head.proj1( model.proj_head.drop1( model.proj_head.ln1(unk_dv) ) )
+# %%
+result[0]
 
-        kno_dv_doc = []
-        kno_mask_doc = []
-        for i in range(kno_dv_proj.shape[0]):
-            kno_dv_doc.append( kno_dv_proj[i:i+1,:,:] )
-            kno_mask_doc.append( kno_mask[i:i+1,1:-1] )
-        kno_dv_doc = torch.cat(kno_dv_doc, dim=1)
-        kno_mask_doc = torch.cat(kno_mask_doc, dim=1)
+# %%
+import seaborn as sns
 
-        unk_dv_doc = []
-        unk_mask_doc = []
-        for i in range(unk_dv_proj.shape[0]):
-            unk_dv_doc.append( unk_dv_proj[i:i+1,:,:] )
-            unk_mask_doc.append( unk_mask[i:i+1,1:-1] )
-        unk_dv_doc = torch.cat(unk_dv_doc, dim=1)
-        unk_mask_doc = torch.cat(unk_mask_doc, dim=1)
+# %%
+pos_dist = []
+neg_dist = []
+for i in range( len( dataset.df ) ):
+    if dataset.df.iloc[i,0] == "Y":
+        pos_dist.append( np.min(result[i]) )
+    else:
+        neg_dist.append( np.min(result[i]) )
 
-        kno_dv_proj = model.proj_head.avg(kno_dv_doc, kno_mask_doc)
-        unk_dv_proj = model.proj_head.avg(unk_dv_doc, unk_mask_doc)
+# %%
+fig = sns.distplot(pos_dist, kde=False, rug=True, hist=True, bins=20,  kde_kws={"color": "blue"} )
+fig = sns.distplot(neg_dist, kde=False, rug=True, hist=True, bins=20,  kde_kws={"color": "red"} )
 
-        dv_comb = torch.cat((kno_dv_proj, unk_dv_proj), dim=1) # [batch, 24]
-        dv_comb = torch.tanh(dv_comb)
+# %%
+dist_val = []
+for i in range( len( dataset.df ) ):
+    dist_val.append( np.median(result[i]) )
 
-        hidden = model.proj_head.drop2( model.proj_head.ln2(dv_comb) )
-        hidden = model.proj_head.dense2(hidden)
-        hidden = torch.tanh(hidden)  # [batch, 24]
+dist_val = np.array(dist_val)
+pred = dist_val > np.median( dist_val )
 
-        hidden = model.proj_head.drop3( model.proj_head.ln3(hidden) )
-        hidden = model.proj_head.dense3(hidden)  # [batch, 1]
-
-        result.append( hidden.item() )
-
-
+truth = ( dataset.df.iloc[:,0] == "Y" ).to_numpy()
+acc = np.sum( pred == truth ) / len(truth)
+print(acc)
 # %%

@@ -53,20 +53,7 @@ class TokenizerCollate:
                 torch.tensor(encode_kno["attention_mask"], dtype=torch.int64), \
                 torch.tensor(encode_unk["input_ids"], dtype=torch.int64), \
                 torch.tensor(encode_unk["attention_mask"], dtype=torch.int64)
-                
-# # %%
-# dataset_train = PANDataset('./data_pickle_cutcombo/pan_14e_cls/train_essays.pickle')
-# tkz = RobertaTokenizer.from_pretrained("roberta-base")
-# collator = TokenizerCollate(tkz=tkz)
-# dl = DataLoader(dataset_train,
-#             batch_size=4,
-#             collate_fn=collator,
-#             num_workers=0,
-#             pin_memory=True, drop_last=False, shuffle=False)
-# # %%
-# batch = next(iter(dl))
-# #%%
-# tkz.convert_ids_to_tokens(batch[1][0,:])
+
 
 # %%
 class DVProjectionHead(nn.Module):
@@ -103,14 +90,65 @@ class DVProjectionHead(nn.Module):
         
         # method 3, real NN
         dv_comb = torch.cat((kno_dv_proj, unk_dv_proj), dim=1) # [batch, 24]
-        dv_comb = F.tanh(dv_comb)
+        dv_comb = torch.tanh(dv_comb)
 
         hidden = self.drop2( self.ln2(dv_comb) )
         hidden = self.dense2(hidden)
-        hidden = F.tanh(hidden)  # [batch, 24]
+        hidden = torch.tanh(hidden)  # [batch, 24]
 
         hidden = self.drop3( self.ln3(hidden) )
         hidden = self.dense3(hidden)  # [batch, 1]
+
+        return hidden
+
+class DVProjectionHead_ActiFirst(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+        self.ln1 = nn.BatchNorm1d(126)
+        self.drop1 = nn.Dropout(p=0.5, inplace=True)
+        self.proj1 = nn.Linear(768, 12)
+
+        self.lnp = nn.BatchNorm1d(126)
+        self.dropp = nn.Dropout(p=0.1, inplace=True)
+        self.densep = nn.Linear(12, 12)
+
+        self.ln2 = nn.BatchNorm1d(24)
+        self.drop2 = nn.Dropout(p=0.1, inplace=True)
+        self.dense2 = nn.Linear(24, 24)
+
+        self.ln3 = nn.BatchNorm1d(24)
+        self.drop3 = nn.Dropout(p=0.1, inplace=True)
+        self.dense3 = nn.Linear(24, 1)
+
+        # self.bias = nn.Parameter( torch.zeros([1]) )
+
+        self.avg = AverageEmbedding()
+
+    def forward(self, kno_dv, kno_mask, unk_dv, unk_mask):
+        # dv = [batch, seq_len, 768]
+
+        kno_dv_proj = self.proj1( self.drop1( self.ln1(kno_dv) ) )
+        kno_dv_proj = torch.tanh(kno_dv_proj)
+        unk_dv_proj = self.proj1( self.drop1( self.ln1(unk_dv) ) )
+        unk_dv_proj = torch.tanh(unk_dv_proj)
+        # dv_proj = [batch, seq_len, 12]
+
+        kno_dv_proj = self.densep( self.dropp( self.lnp(kno_dv_proj) ) )
+        kno_dv_proj = torch.tanh(kno_dv_proj)  # [batch, seq_len, 12]
+        unk_dv_proj = self.densep( self.dropp( self.lnp(unk_dv_proj) ) )
+        unk_dv_proj = torch.tanh(unk_dv_proj)  # [batch, seq_len, 12]
+
+        # along seq_len dim
+        kno_dv_proj = self.avg(kno_dv_proj, kno_mask)  # [batch, 12]
+        unk_dv_proj = self.avg(unk_dv_proj, unk_mask)  # [batch, 12]
+
+        dv_comb = torch.cat((kno_dv_proj, unk_dv_proj), dim=1) # [batch, 24]
+
+        hidden = self.dense2( self.drop2( self.ln2(dv_comb) ) )
+        hidden = torch.tanh(hidden)  # [batch, 24]
+
+        hidden = self.dense3( self.drop3( self.ln3(dv_comb) ) )  # [batch, 1]
 
         return hidden
 
@@ -147,7 +185,9 @@ class LightningLongformerCLS(pl.LightningModule):
         
         self.pred_model = self.roberta.roberta
         self.enc_model = self.pred_model.embeddings.word_embeddings
-        self.proj_head = DVProjectionHead()
+
+        # self.proj_head = DVProjectionHead()
+        self.proj_head = DVProjectionHead_ActiFirst()
 
         self.tkz = RobertaTokenizer.from_pretrained("roberta-base")
         self.collator = TokenizerCollate(self.tkz)
@@ -163,7 +203,8 @@ class LightningLongformerCLS(pl.LightningModule):
         return optimizer
 
     def train_dataloader(self):
-        self.dataset_train = PANDataset('./data_pickle_cutcombo/pan_14n_cls/train_novels.pickle')
+        self.dataset_train = PANDataset('./data_pickle_cutcombo/pan_14e_cls/train_essays_kucombo_only.pickle')
+        # self.dataset_train = PANDataset('./data_pickle_cutcombo/pan_14n_cls/train_novels_kucombo_only.pickle')
         self.loader_train = DataLoader(self.dataset_train,
                                         batch_size=self.train_config["batch_size"],
                                         collate_fn=self.collator,
@@ -172,7 +213,8 @@ class LightningLongformerCLS(pl.LightningModule):
         return self.loader_train
 
     def val_dataloader(self):
-        self.dataset_val = PANDataset('./data_pickle_cutcombo/pan_14n_cls/test02_novels_onecut.pickle')
+        self.dataset_val = PANDataset('./data_pickle_cutcombo/pan_14e_cls/test02_essays_onecut.pickle')
+        # self.dataset_val = PANDataset('./data_pickle_cutcombo/pan_14n_cls/test02_novels_onecut.pickle')
         self.loader_val = DataLoader(self.dataset_val,
                                         batch_size=self.train_config["batch_size"],
                                         collate_fn=self.collator,
@@ -181,7 +223,8 @@ class LightningLongformerCLS(pl.LightningModule):
         return self.loader_val
 
     def test_dataloader(self):
-        self.dataset_test = PANDataset('./data_pickle_cutcombo/pan_14n_cls/test02_novels_onecut.pickle')
+        self.dataset_test = PANDataset('./data_pickle_cutcombo/pan_14e_cls/test02_essays_onecut.pickle')
+        # self.dataset_test = PANDataset('./data_pickle_cutcombo/pan_14n_cls/test02_novels_onecut.pickle')
         self.loader_test = DataLoader(self.dataset_test,
                                         batch_size=self.train_config["batch_size"],
                                         collate_fn=self.collator,
@@ -235,7 +278,6 @@ class LightningLongformerCLS(pl.LightningModule):
             doc_ids, doc_mask = inputs
             doc_embed, doc_pred = one_doc_embed(input_ids=doc_ids, input_mask=doc_mask)
             doc_dv = doc_pred - doc_embed
-            logits = self.proj_head(kno_dv, kno_mask[:,1:-1], unk_dv, unk_mask[:,1:-1])
             return doc_dv
         else:
             labels, kno_ids, kno_mask, unk_ids, unk_mask = inputs
@@ -260,6 +302,7 @@ class LightningLongformerCLS(pl.LightningModule):
         loss, logits, outputs = self( (labels, kno_ids, kno_mask, unk_ids, unk_mask) )
         
         self.log("train_loss", loss)
+        self.log("logits mean", logits.mean())
         
         return loss
 
@@ -277,6 +320,7 @@ class LightningLongformerCLS(pl.LightningModule):
         avg_loss = torch.stack([x['val_loss'] for x in validation_step_outputs]).mean()
         self.log("val_loss", avg_loss)
         self.log('eval accuracy', self.acc.compute())
+        self.log('eval F1', self.f1.compute())
 
 
 # %%
@@ -289,10 +333,10 @@ class LightningLongformerCLS(pl.LightningModule):
 # output = model(batch)
 
 # %%
-@rank_zero_only
+# @rank_zero_only
 def wandb_save(wandb_logger, train_config):
     wandb_logger.log_hyperparams(train_config)
-    wandb_logger.experiment.save('./_dv_pan14e_roberta_projmodel', policy="now")
+    wandb_logger.experiment.save('./_dv_pan14e_roberta_projmodel.py')
 
 # %%
 if __name__ == "__main__":
@@ -306,7 +350,7 @@ if __name__ == "__main__":
 
     pl.seed_everything(42)
 
-    wandb_logger = WandbLogger(name='pan14e_projection',project='AVDV')
+    wandb_logger = WandbLogger(name='pan14e_ActiFirst',project='AVDV')
     wandb_save(wandb_logger, train_config)
 
     model = LightningLongformerCLS(train_config)
@@ -318,7 +362,7 @@ if __name__ == "__main__":
                         accumulate_grad_batches=1,
                         gradient_clip_val=train_config["gradient_clip_val"],
 
-                        gpus=[6],
+                        gpus=[0],
                         num_nodes=1,
                         # accelerator='ddp',
 

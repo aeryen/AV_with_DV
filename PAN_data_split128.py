@@ -35,7 +35,10 @@ def make_all_combo(df):
     known_list = []
     unknown_list = []
     prob_index = []
-
+    pos_kno = 0
+    pos_unk = 0
+    neg_kno = 0
+    neg_unk = 0
     for irow in range(len(df)):
         l = df.iloc[irow, 0]
         kno = "\n".join( df.iloc[irow, 1] )
@@ -43,39 +46,26 @@ def make_all_combo(df):
 
         kno_cut = split_doc(kno, seq_word=100)
         unk_cut = split_doc(unk, seq_word=100)
-        
-        # all known combo
-        for i in range(len(kno_cut)-1):
-            for j in range(i+1, len(kno_cut)):
-                if random() <= 0.5:
-                    known_list.append(kno_cut[i])
-                    unknown_list.append(kno_cut[j])
-                    label_list.append("Y")
-                    prob_index.append(irow)
-
-        # all unknown combo
-        for i in range(len(unk_cut)-1):
-            for j in range(i+1, len(unk_cut)):
-                if random() <= 0.5:
-                    known_list.append(unk_cut[i])
-                    unknown_list.append(unk_cut[j])
-                    label_list.append("Y")
-                    prob_index.append(irow)
+        if l == "Y":
+            pos_kno += len(kno_cut)
+            pos_unk += len(unk_cut)
+        else:
+            neg_kno += len(kno_cut)
+            neg_unk += len(unk_cut)
 
         # all known-unknown combo
         for i in range(len(kno_cut)):
             for j in range(len(unk_cut)):
-                if random() <= 0.5:
-                    known_list.append(kno_cut[i])
-                    unknown_list.append(unk_cut[j])
-                    label_list.append(l)
-                else:
-                    unknown_list.append(kno_cut[i])
-                    known_list.append(unk_cut[j])
-                    label_list.append(l)
+                known_list.append(kno_cut[i])
+                unknown_list.append(unk_cut[j])
+                label_list.append(l)
                 prob_index.append(irow)
         
     result_df = pd.DataFrame({"label":label_list, "known":known_list, "unknown":unknown_list, "prob_index":prob_index})
+    print( "pos_kno", pos_kno )
+    print( "pos_unk", pos_unk )
+    print( "neg_kno", neg_kno )
+    print( "neg_unk", neg_unk )
     return result_df
 
 
@@ -132,23 +122,26 @@ def make_2014e():
 
     train_df = make_all_combo(pan_data14.get_train())
     print( (np.sum( train_df["label"] == "Y" ), np.sum( train_df["label"] == "N" ) ) )
-    train_df.to_pickle(PATH_CLS / 'train_essays.pickle')
+    train_df.to_pickle(PATH_CLS / 'train_essays_kucombo_only.pickle')
 
-    test1_df = make_one_cut(pan_data14.get_test())
-    print( ( np.sum( test1_df["label"] == "Y" ), np.sum( test1_df["label"] == "N" ) ) )
-    test1_df.to_pickle(PATH_CLS / 'test01_essays_onecut.pickle')
+    # test1_df = make_one_cut(pan_data14.get_test())
+    # print( ( np.sum( test1_df["label"] == "Y" ), np.sum( test1_df["label"] == "N" ) ) )
+    # test1_df.to_pickle(PATH_CLS / 'test01_essays_onecut.pickle')
 
-    pan_data14 = PANData(year="14",
-                        train_split=["pan14_train_english-essays"],
-                        test_split=["pan14_test02_english-essays"], known_as="list")
+    # pan_data14 = PANData(year="14",
+    #                     train_split=["pan14_train_english-essays"],
+    #                     test_split=["pan14_test02_english-essays"], known_as="list")
 
-    test2_df = make_one_cut(pan_data14.get_test())
-    print( ( np.sum( test2_df["label"] == "Y" ), np.sum( test2_df["label"] == "N" ) ) )
-    test2_df.to_pickle(PATH_CLS / 'test02_essays_onecut.pickle')
+    # test2_df = make_one_cut(pan_data14.get_test())
+    # print( ( np.sum( test2_df["label"] == "Y" ), np.sum( test2_df["label"] == "N" ) ) )
+    # test2_df.to_pickle(PATH_CLS / 'test02_essays_onecut.pickle')
 
-    test2_df = make_doc_cut_list(pan_data14.get_test())
-    print( ( np.sum( test2_df["label"] == "Y" ), np.sum( test2_df["label"] == "N" ) ) )
-    test2_df.to_pickle(PATH_CLS / 'test02_essays_cutlist.pickle')
+    # test2_df = make_doc_cut_list(pan_data14.get_test())
+    # print( ( np.sum( test2_df["label"] == "Y" ), np.sum( test2_df["label"] == "N" ) ) )
+    # test2_df.to_pickle(PATH_CLS / 'test02_essays_cutlist.pickle')
+
+# %%
+make_2014e()
 
 # %%
 def make_2014n():
@@ -161,23 +154,23 @@ def make_2014n():
 
     train_df = make_all_combo(pan_data14.get_train())
     print( (np.sum( train_df["label"] == "Y" ), np.sum( train_df["label"] == "N" ) ) )
-    train_df.to_pickle(PATH_CLS / 'train_novels.pickle')
+    train_df.to_pickle(PATH_CLS / 'train_novels_kucombo_only.pickle')
 
-    test1_df = make_one_cut(pan_data14.get_test())
-    print( ( np.sum( test1_df["label"] == "Y" ), np.sum( test1_df["label"] == "N" ) ) )
-    test1_df.to_pickle(PATH_CLS / 'test01_novels_onecut.pickle')
+    # test1_df = make_one_cut(pan_data14.get_test())
+    # print( ( np.sum( test1_df["label"] == "Y" ), np.sum( test1_df["label"] == "N" ) ) )
+    # test1_df.to_pickle(PATH_CLS / 'test01_novels_onecut.pickle')
 
-    pan_data14 = PANData(year="14",
-                        train_split=["pan14_train_english-novels"],
-                        test_split=["pan14_test02_english-novels"], known_as="list")
+    # pan_data14 = PANData(year="14",
+    #                     train_split=["pan14_train_english-novels"],
+    #                     test_split=["pan14_test02_english-novels"], known_as="list")
 
-    test2_df = make_one_cut(pan_data14.get_test())
-    print( ( np.sum( test2_df["label"] == "Y" ), np.sum( test2_df["label"] == "N" ) ) )
-    test2_df.to_pickle(PATH_CLS / 'test02_novels_onecut.pickle')
+    # test2_df = make_one_cut(pan_data14.get_test())
+    # print( ( np.sum( test2_df["label"] == "Y" ), np.sum( test2_df["label"] == "N" ) ) )
+    # test2_df.to_pickle(PATH_CLS / 'test02_novels_onecut.pickle')
 
-    test2_df = make_doc_cut_list(pan_data14.get_test())
-    print( ( np.sum( test2_df["label"] == "Y" ), np.sum( test2_df["label"] == "N" ) ) )
-    test2_df.to_pickle(PATH_CLS / 'test02_novels_cutlist.pickle')
+    # test2_df = make_doc_cut_list(pan_data14.get_test())
+    # print( ( np.sum( test2_df["label"] == "Y" ), np.sum( test2_df["label"] == "N" ) ) )
+    # test2_df.to_pickle(PATH_CLS / 'test02_novels_cutlist.pickle')
 # %%
 make_2014n()
 # %%
