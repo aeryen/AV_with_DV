@@ -79,6 +79,26 @@ def make_all_combo(df):
     return result_df
 
 
+def make_doc_cut_list(df):
+    label_list = []
+    known_list = []
+    unknown_list = []
+    prob_index = []
+
+    for irow in range(len(df)):
+        l = df.iloc[irow, 0]
+        kno = "\n".join( df.iloc[irow, 1] )
+        unk = df.iloc[irow, 2]
+
+        kno_cut = split_doc(kno, seq_word=100)
+        unk_cut = split_doc(unk, seq_word=100)
+
+        known_list.append(kno_cut)
+        unknown_list.append(unk_cut)
+        label_list.append(l)
+    result_df = pd.DataFrame({"label":label_list, "known":known_list, "unknown":unknown_list})
+    return result_df    
+
 def make_one_cut(df):
     label_list = []
     known_list = []
@@ -102,33 +122,62 @@ def make_one_cut(df):
     return result_df
 
 # %%
-pan_data14 = PANData(year="14",
-                    train_split=["pan14_train_english-essays"],
-                    test_split=["pan14_test01_english-essays"], known_as="list")
-# %%
-df = pan_data14.get_train()
-train_df = make_all_combo(df)
-np.sum( train_df["label"] == "Y" ), np.sum( train_df["label"] == "N" )
-# %%
-PATH_CLS = Path('./data_pickle_cutcombo/pan_14e_cls/')
-PATH_CLS.mkdir(exist_ok=True)
-train_df.to_pickle(PATH_CLS / 'train_essays.pickle')
-# %%
-test1_df = make_one_cut(pan_data14.get_test())
-np.sum( test1_df["label"] == "Y" ), np.sum( test1_df["label"] == "N" )
-# %%
-PATH_CLS = Path('./data_pickle_cutcombo/pan_14e_cls/')
-PATH_CLS.mkdir(exist_ok=True)
-test1_df.to_pickle(PATH_CLS / 'test01_essays_onecut.pickle')
-# %%
-pan_data14 = PANData(year="14",
+def make_2014e():
+    PATH_CLS = Path('./data_pickle_cutcombo/pan_14e_cls/')
+    PATH_CLS.mkdir(exist_ok=True)
+
+    pan_data14 = PANData(year="14",
+                        train_split=["pan14_train_english-essays"],
+                        test_split=["pan14_test01_english-essays"], known_as="list")
+
+    train_df = make_all_combo(pan_data14.get_train())
+    print( (np.sum( train_df["label"] == "Y" ), np.sum( train_df["label"] == "N" ) ) )
+    train_df.to_pickle(PATH_CLS / 'train_essays.pickle')
+
+    test1_df = make_one_cut(pan_data14.get_test())
+    print( ( np.sum( test1_df["label"] == "Y" ), np.sum( test1_df["label"] == "N" ) ) )
+    test1_df.to_pickle(PATH_CLS / 'test01_essays_onecut.pickle')
+
+    pan_data14 = PANData(year="14",
                         train_split=["pan14_train_english-essays"],
                         test_split=["pan14_test02_english-essays"], known_as="list")
+
+    test2_df = make_one_cut(pan_data14.get_test())
+    print( ( np.sum( test2_df["label"] == "Y" ), np.sum( test2_df["label"] == "N" ) ) )
+    test2_df.to_pickle(PATH_CLS / 'test02_essays_onecut.pickle')
+
+    test2_df = make_doc_cut_list(pan_data14.get_test())
+    print( ( np.sum( test2_df["label"] == "Y" ), np.sum( test2_df["label"] == "N" ) ) )
+    test2_df.to_pickle(PATH_CLS / 'test02_essays_cutlist.pickle')
+
 # %%
-test2_df = make_one_cut(pan_data14.get_test())
-np.sum( test2_df["label"] == "Y" ), np.sum( test2_df["label"] == "N" )
+def make_2014n():
+    PATH_CLS = Path('./data_pickle_cutcombo/pan_14n_cls/')
+    PATH_CLS.mkdir(exist_ok=True)
+
+    pan_data14 = PANData(year="14",
+                        train_split=["pan14_train_english-novels"],
+                        test_split=["pan14_test01_english-novels"], known_as="list")
+
+    train_df = make_all_combo(pan_data14.get_train())
+    print( (np.sum( train_df["label"] == "Y" ), np.sum( train_df["label"] == "N" ) ) )
+    train_df.to_pickle(PATH_CLS / 'train_novels.pickle')
+
+    test1_df = make_one_cut(pan_data14.get_test())
+    print( ( np.sum( test1_df["label"] == "Y" ), np.sum( test1_df["label"] == "N" ) ) )
+    test1_df.to_pickle(PATH_CLS / 'test01_novels_onecut.pickle')
+
+    pan_data14 = PANData(year="14",
+                        train_split=["pan14_train_english-novels"],
+                        test_split=["pan14_test02_english-novels"], known_as="list")
+
+    test2_df = make_one_cut(pan_data14.get_test())
+    print( ( np.sum( test2_df["label"] == "Y" ), np.sum( test2_df["label"] == "N" ) ) )
+    test2_df.to_pickle(PATH_CLS / 'test02_novels_onecut.pickle')
+
+    test2_df = make_doc_cut_list(pan_data14.get_test())
+    print( ( np.sum( test2_df["label"] == "Y" ), np.sum( test2_df["label"] == "N" ) ) )
+    test2_df.to_pickle(PATH_CLS / 'test02_novels_cutlist.pickle')
 # %%
-PATH_CLS = Path('./data_pickle_cutcombo/pan_14e_cls/')
-PATH_CLS.mkdir(exist_ok=True)
-test2_df.to_pickle(PATH_CLS / 'test02_essays_onecut.pickle')
+make_2014n()
 # %%

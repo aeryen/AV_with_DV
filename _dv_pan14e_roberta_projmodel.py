@@ -163,7 +163,7 @@ class LightningLongformerCLS(pl.LightningModule):
         return optimizer
 
     def train_dataloader(self):
-        self.dataset_train = PANDataset('./data_pickle_cutcombo/pan_14e_cls/train_essays.pickle')
+        self.dataset_train = PANDataset('./data_pickle_cutcombo/pan_14n_cls/train_novels.pickle')
         self.loader_train = DataLoader(self.dataset_train,
                                         batch_size=self.train_config["batch_size"],
                                         collate_fn=self.collator,
@@ -172,7 +172,7 @@ class LightningLongformerCLS(pl.LightningModule):
         return self.loader_train
 
     def val_dataloader(self):
-        self.dataset_val = PANDataset('./data_pickle_cutcombo/pan_14e_cls/test02_essays_onecut.pickle')
+        self.dataset_val = PANDataset('./data_pickle_cutcombo/pan_14n_cls/test02_novels_onecut.pickle')
         self.loader_val = DataLoader(self.dataset_val,
                                         batch_size=self.train_config["batch_size"],
                                         collate_fn=self.collator,
@@ -181,7 +181,7 @@ class LightningLongformerCLS(pl.LightningModule):
         return self.loader_val
 
     def test_dataloader(self):
-        self.dataset_test = PANDataset('./data_pickle_cutcombo/pan_14e_cls/test02_essays_onecut.pickle')
+        self.dataset_test = PANDataset('./data_pickle_cutcombo/pan_14n_cls/test02_novels_onecut.pickle')
         self.loader_test = DataLoader(self.dataset_test,
                                         batch_size=self.train_config["batch_size"],
                                         collate_fn=self.collator,
@@ -190,7 +190,7 @@ class LightningLongformerCLS(pl.LightningModule):
         return self.loader_test
     
 #     @autocast()
-    def forward(self, inputs):
+    def forward(self, inputs, onedoc_enc=False):
         def one_doc_embed(input_ids, input_mask, mask_n=1):
             uniq_mask = []
             uniq_input, inverse_indices = torch.unique( input_ids, return_inverse=True, dim=0 )
@@ -231,21 +231,28 @@ class LightningLongformerCLS(pl.LightningModule):
             rec_pred = torch.stack(rec_pred, dim=0)
             return rec_embed, rec_pred
 
-        labels, kno_ids, kno_mask, unk_ids, unk_mask = inputs
+        if onedoc_enc:
+            doc_ids, doc_mask = inputs
+            doc_embed, doc_pred = one_doc_embed(input_ids=doc_ids, input_mask=doc_mask)
+            doc_dv = doc_pred - doc_embed
+            logits = self.proj_head(kno_dv, kno_mask[:,1:-1], unk_dv, unk_mask[:,1:-1])
+            return doc_dv
+        else:
+            labels, kno_ids, kno_mask, unk_ids, unk_mask = inputs
 
-        kno_embed, kno_pred = one_doc_embed(input_ids=kno_ids, input_mask=kno_mask)
-        unk_embed, unk_pred = one_doc_embed(input_ids=unk_ids, input_mask=unk_mask)
+            kno_embed, kno_pred = one_doc_embed(input_ids=kno_ids, input_mask=kno_mask)
+            unk_embed, unk_pred = one_doc_embed(input_ids=unk_ids, input_mask=unk_mask)
 
-        kno_dv = kno_pred - kno_embed
-        unk_dv = unk_pred - unk_embed
+            kno_dv = kno_pred - kno_embed
+            unk_dv = unk_pred - unk_embed
 
-        logits = self.proj_head(kno_dv, kno_mask[:,1:-1], unk_dv, unk_mask[:,1:-1])
+            logits = self.proj_head(kno_dv, kno_mask[:,1:-1], unk_dv, unk_mask[:,1:-1])
 
-        logits = torch.squeeze(logits)
-        labels = labels.float()
-        loss = self.lossfunc(logits, labels)
+            logits = torch.squeeze(logits)
+            labels = labels.float()
+            loss = self.lossfunc(logits, labels)
 
-        return (loss, logits, (kno_embed, kno_pred, unk_embed, unk_pred))
+            return (loss, logits, (kno_embed, kno_pred, unk_embed, unk_pred))
     
     def training_step(self, batch, batch_idx):
         labels, kno_ids, kno_mask, unk_ids, unk_mask  = batch
@@ -271,25 +278,6 @@ class LightningLongformerCLS(pl.LightningModule):
         self.log("val_loss", avg_loss)
         self.log('eval accuracy', self.acc.compute())
 
-    # def on_test_epoch_start(self):
-    #     self.test_logit_outputs = []
-    #     self.test_aspect_outputs = []
-
-    # def test_step(self, batch, batch_idx):
-    #     input_ids, mask, label  = batch[0].type(torch.int64), batch[1].type(torch.int64), batch[2].type(torch.int64)
-        
-    #     loss, logits, outputs, aspect_doc = self(input_ids=input_ids, attention_mask=mask, labels=label)
-    #     accs = [m(logits, label) for m in self.metrics]  # update metric counters
-
-    #     self.test_logit_outputs.append(logits)
-    #     self.test_aspect_outputs.extend(aspect_doc)
-        
-    #     return loss
-
-    # def on_test_epoch_end(self):
-    #     for i,m in enumerate(self.metrics):
-    #         print('acc'+str(i), m.compute())
-
 
 # %%
 # _ = model.to("cuda:6")
@@ -310,7 +298,7 @@ def wandb_save(wandb_logger, train_config):
 if __name__ == "__main__":
     train_config = {}
     train_config["cache_dir"] = "./cache/"
-    train_config["epochs"] = 16
+    train_config["epochs"] = 10
     train_config["batch_size"] = 256
     # train_config["accumulate_grad_batches"] = 12
     train_config["gradient_clip_val"] = 1.5
@@ -318,7 +306,7 @@ if __name__ == "__main__":
 
     pl.seed_everything(42)
 
-    wandb_logger = WandbLogger(name='first_projection',project='AVDV')
+    wandb_logger = WandbLogger(name='pan14e_projection',project='AVDV')
     wandb_save(wandb_logger, train_config)
 
     model = LightningLongformerCLS(train_config)
@@ -333,7 +321,6 @@ if __name__ == "__main__":
                         gpus=[6],
                         num_nodes=1,
                         # accelerator='ddp',
-                        # plugins='ddp_sharded',
 
                         amp_backend='native',
                         precision=16,
