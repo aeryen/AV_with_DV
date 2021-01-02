@@ -20,7 +20,7 @@ tokenizer = RobertaTokenizer.from_pretrained("roberta-base")
 #%%
 model = RobertaForMaskedLM.from_pretrained('roberta-base')
 _ = model.eval()
-_ = model.to('cuda:6')
+_ = model.to('cuda:1')
 
 for param in model.parameters():
     param.requires_grad = False

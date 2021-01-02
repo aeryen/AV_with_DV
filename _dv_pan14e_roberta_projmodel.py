@@ -322,18 +322,8 @@ class LightningLongformerCLS(pl.LightningModule):
         self.log('eval accuracy', self.acc.compute())
         self.log('eval F1', self.f1.compute())
 
-
 # %%
-# _ = model.to("cuda:6")
-# %%
-# train_dl = model.train_dataloader()
-# batch = next(iter(train_dl))
-# for i in range(len(batch)):
-#     batch[i] = batch[i].to("cuda:6")
-# output = model(batch)
-
-# %%
-# @rank_zero_only
+@rank_zero_only
 def wandb_save(wandb_logger, train_config):
     wandb_logger.log_hyperparams(train_config)
     wandb_logger.experiment.save('./_dv_pan14e_roberta_projmodel.py')

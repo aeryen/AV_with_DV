@@ -38,7 +38,7 @@ def eval_model_onecut(model, test_dl):
 # proj12_nn12-12-1tanh_good
 # model = LightningLongformerCLS.load_from_checkpoint("AVDV/239gfgeh/checkpoints/epoch=4-step=1649.ckpt", config=train_config)
 
-model = LightningLongformerCLS.load_from_checkpoint("AVDV/2nimjle3/checkpoints/epoch=2-step=998.ckpt", config=train_config)
+model = LightningLongformerCLS.load_from_checkpoint("AVDV/2ggjzv1t/checkpoints/epoch=6-step=2330.ckpt", config=train_config)
 
 # %%
 tkz = RobertaTokenizer.from_pretrained("roberta-base")
