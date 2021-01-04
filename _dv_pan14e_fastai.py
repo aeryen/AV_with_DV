@@ -3,7 +3,7 @@ from fastai.text.all import *
 from tqdm import tqdm
 import os
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "6"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
 # %%
 import torch.nn.functional as F
@@ -13,12 +13,17 @@ torch.cuda.set_device('cuda:0')
 defaults.device = "cuda:0"
 
 # %%
-df_train = pd.read_pickle('./data_new/pan_14e_cls/train_essays.pickle')
-df_test01 = pd.read_pickle('./data_new/pan_14e_cls/test01_essays.pickle')
-df_test02 = pd.read_pickle('./data_new/pan_14e_cls/test02_essays.pickle')
+def eval_direct_dist():
+    pass
+
+# %%
+df_train = pd.read_pickle('./data_pickle_fastai/pan_14e_cls/train_essays.pickle')
+df_test01 = pd.read_pickle('./data_pickle_fastai/pan_14e_cls/test01_essays.pickle')
+df_test02 = pd.read_pickle('./data_pickle_fastai/pan_14e_cls/test02_essays.pickle')
 df_train
 # %%
 len(df_train), len(df_test01), len(df_test02)
+
 # %%
 # Getting unique documents
 uniq_list = []
@@ -93,20 +98,17 @@ def pred_raw(learn, df):
 test_prob, test_label = pred_raw(learn, df_test02)
 
 # %%
-result = dl.test_dl([df.iloc[0, 2]])
-
-# %%
 # Experiment with RAW Values
 
 # %%
-truth = np.array(test_label) == "Y"
+truth = df_test02.iloc[:,0].to_numpy() == "Y"
 truth
 # %%
 result = []
 for i in range(len(test_prob)):
 #     print(i)
-    result_k = torch.mean(test_prob[i]["k"][0]["e"][1:,:] - test_prob[i]["k"][0]["p"][-1,:], dim=0, keepdim=True)
-    result_u = torch.mean(test_prob[i]["u"]["e"][1:,:] - test_prob[i]["u"]["p"][-1,:], dim=0, keepdim=True)
+    result_k = torch.mean(test_prob[i]["k"][0]["e"][1:,:] - test_prob[i]["k"][0]["p"][:-1,:], dim=0, keepdim=True)
+    result_u = torch.mean(test_prob[i]["u"]["e"][1:,:] - test_prob[i]["u"]["p"][:-1,:], dim=0, keepdim=True)
     r = F.cosine_similarity(result_k, result_u).cpu().item()
     
     result.append(r)
@@ -117,7 +119,5 @@ pred = result > np.median(result)
 pred
 # %%
 np.sum( pred == truth ) / len(truth)
-# %%
-truth = df_test02.iloc[:,0].to_numpy() == "Y"
-truth
+
 # %%

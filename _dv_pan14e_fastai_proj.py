@@ -2,10 +2,11 @@
 import os
 from fastai.text.data import TextDataLoaders
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "6"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
 import pandas as pd
 import numpy as np
+from tqdm import tqdm
 
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
@@ -19,9 +20,9 @@ from fastai.text.all import *
 
 def get_lm_dataloader():
     print( "Init LM DataLoader" )
-    df_train = pd.read_pickle('./data_new/pan_14e_cls/train_essays.pickle')
-    df_test01 = pd.read_pickle('./data_new/pan_14e_cls/test01_essays.pickle')
-    df_test02 = pd.read_pickle('./data_new/pan_14e_cls/test02_essays.pickle')
+    df_train = pd.read_pickle('./data_pickle_fastai/pan_14e_cls/train_essays.pickle')
+    df_test01 = pd.read_pickle('./data_pickle_fastai/pan_14e_cls/test01_essays.pickle')
+    df_test02 = pd.read_pickle('./data_pickle_fastai/pan_14e_cls/test02_essays.pickle')
     uniq_list = []
     for dfi, df in enumerate([df_train, df_test01, df_test02]):
         for i in range(len(df)):
@@ -33,7 +34,7 @@ def get_lm_dataloader():
     print( "Unique doc list of len:", len(uniq_list) )
     uniq_list = pd.DataFrame(uniq_list)
     dl = TextDataLoaders.from_df(uniq_list,
-                                path='./data_new/pan_14e_cls/',
+                                path='./data_pickle_fastai/pan_14e_cls/',
                                 is_lm=True,
                                 text_col=0,
                                 valid_pct=0.15
@@ -74,22 +75,50 @@ def get_cls_dataloader():
     return dl
 
 # %%
-cls_dl = get_cls_dataloader()
+lmdl = get_lm_dataloader()
+learn = language_model_learner(lmdl, AWD_LSTM)
 
 # %%
-class LnDVProjectionModel(pl.LightningModule):
-    def __init__(self, config):
-        super().__init__()
-        self.train_config = config
-        lm_dataloader = get_lm_dataloader()
-        learner = language_model_learner(lm_dataloader, AWD_LSTM,
-                               metrics=[accuracy, Perplexity()],
-                               path="./model/lm_pan14e/",
-                               wd=0.1)
-        lstm_model = learner.model
+learn.predict('This movie is about', n_words=20)
+# %%
+learn.model
+# %%
+def one_doc_embed(learn, doc):
+    pred_enc = model[0]
+    doc_enc = model[0].encoder
     
-    def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=self.train_config["learning_rate"])
+    ids, _ = learn.data.one_item(doc)
+    
+    with torch.no_grad():
+        pred_enc.reset()
+        embed = doc_enc(ids).detach()
+        pred  = pred_enc(ids)[0][-1].detach()
+        
+        return {"e":embed, "p":pred}
 
-    def train_dataloader(self):
-        pass
+def pred_raw(model, df):
+    prob_list = []
+    label_list = []
+    
+    for i in tqdm(range(len(df))):
+        k_results = []
+        for k_doc in df.iloc[i,1]:
+            k_results.append( one_doc_embed(model, k_doc) )
+
+        u_results = one_doc_embed(learn, df.iloc[i,2])
+        prob_list.append( {"k":k_results, "u":u_results} )
+        label_list.append( df.iloc[i,0] )
+        
+    return  prob_list, label_list
+
+# %%
+df_train = pd.read_pickle('./data_pickle_fastai/pan_14e_cls/train_essays.pickle')
+df_test01 = pd.read_pickle('./data_pickle_fastai/pan_14e_cls/test01_essays.pickle')
+df_test02 = pd.read_pickle('./data_pickle_fastai/pan_14e_cls/test02_essays.pickle')
+
+# %%
+test_prob, test_label = pred_raw(learn, df_test02)
+
+# %%
+
+# %%

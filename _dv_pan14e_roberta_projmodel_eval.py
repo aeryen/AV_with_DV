@@ -3,8 +3,10 @@ import os
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 from tqdm import tqdm
 import numpy as np
+from sklearn.metrics import f1_score
 import torch
 from torch.utils.data import DataLoader
+import torch.nn.functional as F
 from transformers import RobertaTokenizer
 from _dv_pan14e_roberta_projmodel import LightningLongformerCLS, PANDataset, TokenizerCollate
 
@@ -32,13 +34,50 @@ def eval_model_onecut(model, test_dl):
 
     acc = np.sum( pred == truth ) / len(truth)
     print(acc)
+
+    return acc
+
+def eval_model_onecut_projcos(model, test_dl):
+    model = model.to("cuda:5")
+    model = model.eval()
+    batch = next(iter(test_dl))
+    batch = [d.to("cuda:5") for d in batch]
+    label, kno_ids, kno_mask, unk_ids, unk_mask = batch
+    with torch.no_grad():
+        kno_dv = model( (kno_ids, kno_mask), onedoc_enc=True)
+        unk_dv = model( (unk_ids, unk_mask), onedoc_enc=True)
+
+        kno_dv_proj = model.proj_head.proj1( model.proj_head.drop1( model.proj_head.ln1(kno_dv) ) )
+        kno_dv_proj = torch.tanh(kno_dv_proj)
+        unk_dv_proj = model.proj_head.proj1( model.proj_head.drop1( model.proj_head.ln1(unk_dv) ) )
+        unk_dv_proj = torch.tanh(unk_dv_proj)
+        # dv_proj = [batch, seq_len, 12]
+
+        kno_dv_proj = model.proj_head.densep( model.proj_head.dropp( model.proj_head.lnp(kno_dv_proj) ) )
+        kno_dv_proj = torch.tanh(kno_dv_proj)  # [batch, seq_len, 12]
+        unk_dv_proj = model.proj_head.densep( model.proj_head.dropp( model.proj_head.lnp(unk_dv_proj) ) )
+        unk_dv_proj = torch.tanh(unk_dv_proj)  # [batch, seq_len, 12]
+
+        # along seq_len dim
+        kno_dv_proj = model.proj_head.avg(kno_dv_proj, kno_mask[:,1:-1])  # [batch, 12]
+        unk_dv_proj = model.proj_head.avg(unk_dv_proj, unk_mask[:,1:-1])  # [batch, 12]
+
+        logits = F.cosine_similarity(kno_dv_proj, unk_dv_proj).cpu()
+
+    pred = (logits > logits.median()).cpu().numpy()
+    truth = batch[0].cpu().numpy()
+
+    acc = np.sum( pred == truth ) / len(truth)
+    print(acc)
+
     return acc
 
 # %%
 # proj12_nn12-12-1tanh_good
 # model = LightningLongformerCLS.load_from_checkpoint("AVDV/239gfgeh/checkpoints/epoch=4-step=1649.ckpt", config=train_config)
 
-model = LightningLongformerCLS.load_from_checkpoint("AVDV/2ggjzv1t/checkpoints/epoch=6-step=2330.ckpt", config=train_config)
+# model = LightningLongformerCLS.load_from_checkpoint("AVDV/1etluotx/checkpoints/epoch=6-step=1175.ckpt", config=train_config)
+model = LightningLongformerCLS.load_from_checkpoint("AVDV/1etluotx/checkpoints/epoch=8-step=1511.ckpt", config=train_config)
 
 # %%
 tkz = RobertaTokenizer.from_pretrained("roberta-base")
@@ -50,6 +89,9 @@ dl_14e = DataLoader(dataset_14e,
                         collate_fn=TokenizerCollate(tkz),
                         num_workers=0, drop_last=False, shuffle=False)
 acc = eval_model_onecut(model, dl_14e)
+
+# %%
+acc = eval_model_onecut_projcos(model, dl_14e)
 
 # %%
 dataset_14n = PANDataset('./data_pickle_cutcombo/pan_14n_cls/test02_novels_onecut.pickle')
@@ -72,9 +114,15 @@ def eval_model_wholedoc(model, test_dl):
             kno_dv = model( (kno_ids, kno_mask) , onedoc_enc=True)
             unk_dv = model( (unk_ids, unk_mask) , onedoc_enc=True)
 
-            # logits = model.proj_head(kno_dv, kno_mask[:,1:-1], unk_dv, unk_mask[:,1:-1])
             kno_dv_proj = model.proj_head.proj1( model.proj_head.drop1( model.proj_head.ln1(kno_dv) ) )
+            kno_dv_proj = torch.tanh(kno_dv_proj)
             unk_dv_proj = model.proj_head.proj1( model.proj_head.drop1( model.proj_head.ln1(unk_dv) ) )
+            unk_dv_proj = torch.tanh(unk_dv_proj)
+
+            kno_dv_proj = model.proj_head.densep( model.proj_head.dropp( model.proj_head.lnp(kno_dv_proj) ) )
+            kno_dv_proj = torch.tanh(kno_dv_proj)
+            unk_dv_proj = model.proj_head.densep( model.proj_head.dropp( model.proj_head.lnp(unk_dv_proj) ) )
+            unk_dv_proj = torch.tanh(unk_dv_proj)
 
             kno_dv_doc = []
             kno_mask_doc = []
@@ -96,14 +144,11 @@ def eval_model_wholedoc(model, test_dl):
             unk_dv_proj = model.proj_head.avg(unk_dv_doc, unk_mask_doc)
 
             dv_comb = torch.cat((kno_dv_proj, unk_dv_proj), dim=1) # [batch, 24]
-            dv_comb = torch.tanh(dv_comb)
 
-            hidden = model.proj_head.drop2( model.proj_head.ln2(dv_comb) )
-            hidden = model.proj_head.dense2(hidden)
+            hidden = model.proj_head.dense2( model.proj_head.drop2( model.proj_head.ln2(dv_comb) ) )
             hidden = torch.tanh(hidden)  # [batch, 24]
 
-            hidden = model.proj_head.drop3( model.proj_head.ln3(hidden) )
-            hidden = model.proj_head.dense3(hidden)  # [batch, 1]
+            hidden = model.proj_head.dense3 (model.proj_head.drop3( model.proj_head.ln3(hidden) ) )  # [batch, 1]
 
             result.append( hidden.item() )
 
@@ -184,12 +229,20 @@ fig = sns.distplot(neg_dist, kde=False, rug=True, hist=True, bins=20,  kde_kws={
 # %%
 dist_val = []
 for i in range( len( dataset.df ) ):
-    dist_val.append( np.median(result[i]) )
+    dist_val.append( np.max(result[i]) )
 
 dist_val = np.array(dist_val)
-pred = dist_val > np.median( dist_val )
+pred = dist_val > np.max( dist_val )
 
 truth = ( dataset.df.iloc[:,0] == "Y" ).to_numpy()
 acc = np.sum( pred == truth ) / len(truth)
 print(acc)
+# %%
+
+# %%
+pred, acc = eval_model_wholedoc(model, dl_14e)
+
+# %%
+acc
+
 # %%

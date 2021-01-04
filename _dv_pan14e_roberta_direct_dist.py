@@ -1,4 +1,4 @@
-#%%
+# %%
 import os
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 
@@ -9,18 +9,23 @@ from transformers import RobertaTokenizer, RobertaForMaskedLM
 import logging
 logging.basicConfig(level=logging.INFO)
 
-#%%
+# %%
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-#%%
+# %%
+train_config = {}
+train_config["cache_dir"] = "./cache/"
+train_config["gpu_id"] = "cuda:1"
+
+# %%
 tokenizer = RobertaTokenizer.from_pretrained("roberta-base")
 
-#%%
+# %%
 model = RobertaForMaskedLM.from_pretrained('roberta-base')
 _ = model.eval()
-_ = model.to('cuda:1')
+_ = model.to(train_config["gpu_id"])
 
 for param in model.parameters():
     param.requires_grad = False
@@ -28,7 +33,7 @@ for param in model.parameters():
 pred_model = model.roberta
 enco_model = pred_model.embeddings.word_embeddings
 
-#%%
+# %%
 text = "Assesing ones strengths and weaknesses in any situation is a hard task." + \
        " Usually we are not so good at recognizing our strengths, instead we spend our time being critical of ourselves," + \
        " thus we tend to present a much more detailed side of our flaws."
@@ -47,7 +52,7 @@ for i in range(1, len(encoded_text["input_ids"])-1):
     with torch.no_grad():
         outputs = pred_model(input_ids=masked_ids, attention_mask=input_mask, return_dict=False)[0]
         
-#%%
+# %%
 def one_doc_embed(enc_model, pred_model, input_ids, input_mask, mask_n=1):
     with torch.no_grad():
         embed = enc_model(input_ids).detach()  # remove start and end symbol
@@ -70,32 +75,26 @@ def one_doc_embed(enc_model, pred_model, input_ids, input_mask, mask_n=1):
         return {"e": result_embed, "p": result_pred}
 
 # %%
-df_test02 = pd.read_pickle('./data_pickle_trfm/pan_14e_cls/test02_essays.pickle')
+df_test02 = pd.read_pickle('./data_pickle_cutcombo/pan_14e_cls/test02_essays.pickle')
 df_test02
 
 # %%
-encoded_text = tokenizer(df_test02.iloc[0,2][:1000])
-# tokenizer.convert_ids_to_tokens(encoded_text["input_ids"])
-
-# %%
-input_mask = torch.tensor([encoded_text["attention_mask"]]).to('cuda:6')
-input_ids = torch.tensor([encoded_text["input_ids"]]).to('cuda:6')
-
-result = one_doc_embed( enco_model, pred_model, input_ids, input_mask, mask_n=3 )
+df_test02 = pd.read_pickle('./data_pickle_cutcombo/pan_14n_cls/test02_novels_cutlist.pickle')
+df_test02
 
 # %%
 result_list = []
 for i in tqdm(range(len(df_test02))):
 # for i in tqdm(range(10)):
-    encoded_text = tokenizer(df_test02.iloc[i,1][0][:1000])
-    input_mask = torch.tensor([encoded_text["attention_mask"]]).to('cuda:6')
-    input_ids = torch.tensor([encoded_text["input_ids"]]).to('cuda:6')
-    k_result = one_doc_embed( enco_model, pred_model, input_ids, input_mask, mask_n=3 )
+    encoded_text = tokenizer(df_test02.iloc[i,1][0])
+    input_mask = torch.tensor([encoded_text["attention_mask"]]).to(train_config["gpu_id"])
+    input_ids = torch.tensor([encoded_text["input_ids"]]).to(train_config["gpu_id"])
+    k_result = one_doc_embed( enco_model, pred_model, input_ids, input_mask, mask_n=5 )
 
-    encoded_text = tokenizer(df_test02.iloc[i,2][:1000])
-    input_mask = torch.tensor([encoded_text["attention_mask"]]).to('cuda:6')
-    input_ids = torch.tensor([encoded_text["input_ids"]]).to('cuda:6')
-    u_result = one_doc_embed( enco_model, pred_model, input_ids, input_mask, mask_n=3 )
+    encoded_text = tokenizer(df_test02.iloc[i,2][0])
+    input_mask = torch.tensor([encoded_text["attention_mask"]]).to(train_config["gpu_id"])
+    input_ids = torch.tensor([encoded_text["input_ids"]]).to(train_config["gpu_id"])
+    u_result = one_doc_embed( enco_model, pred_model, input_ids, input_mask, mask_n=5 )
 
     result_list.append({"k": k_result, "u": u_result})
 

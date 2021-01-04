@@ -14,6 +14,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
+from torch.cuda.amp import autocast
 
 import transformers
 from transformers import RobertaTokenizer, RobertaForMaskedLM
@@ -60,17 +61,18 @@ class DVProjectionHead(nn.Module):
 
     def __init__(self):
         super().__init__()
+        self.hid_sz = 12
         self.ln1 = nn.BatchNorm1d(126)
         self.drop1 = nn.Dropout(p=0.5, inplace=True)
-        self.proj1 = nn.Linear(768, 12)
+        self.proj1 = nn.Linear(768, self.hid_sz)
 
-        self.ln2 = nn.BatchNorm1d(24)
+        self.ln2 = nn.BatchNorm1d(self.hid_sz*2)
         self.drop2 = nn.Dropout(p=0.1, inplace=True)
-        self.dense2 = nn.Linear(24, 24)
+        self.dense2 = nn.Linear(self.hid_sz*2, self.hid_sz*2)
 
-        self.ln3 = nn.BatchNorm1d(24)
+        self.ln3 = nn.BatchNorm1d(self.hid_sz*2)
         self.drop3 = nn.Dropout(p=0.1, inplace=True)
-        self.dense3 = nn.Linear(24, 1)
+        self.dense3 = nn.Linear(self.hid_sz*2, 1)
 
         # self.bias = nn.Parameter( torch.zeros([1]) )
 
@@ -105,23 +107,25 @@ class DVProjectionHead_ActiFirst(nn.Module):
 
     def __init__(self):
         super().__init__()
+        self.proj_sz = 64
+        self.act_sz = 64
+        self.doc_sz = 32
+
         self.ln1 = nn.BatchNorm1d(126)
         self.drop1 = nn.Dropout(p=0.5, inplace=True)
-        self.proj1 = nn.Linear(768, 12)
+        self.proj1 = nn.Linear(768, self.proj_sz)
 
         self.lnp = nn.BatchNorm1d(126)
-        self.dropp = nn.Dropout(p=0.1, inplace=True)
-        self.densep = nn.Linear(12, 12)
+        self.dropp = nn.Dropout(p=0.15, inplace=True)
+        self.densep = nn.Linear(self.proj_sz, self.act_sz)
 
-        self.ln2 = nn.BatchNorm1d(24)
-        self.drop2 = nn.Dropout(p=0.1, inplace=True)
-        self.dense2 = nn.Linear(24, 24)
+        self.ln2 = nn.BatchNorm1d(self.act_sz*2)
+        self.drop2 = nn.Dropout(p=0.15, inplace=True)
+        self.dense2 = nn.Linear(self.act_sz*2, self.doc_sz)
 
-        self.ln3 = nn.BatchNorm1d(24)
-        self.drop3 = nn.Dropout(p=0.1, inplace=True)
-        self.dense3 = nn.Linear(24, 1)
-
-        # self.bias = nn.Parameter( torch.zeros([1]) )
+        self.ln3 = nn.BatchNorm1d(self.doc_sz)
+        self.drop3 = nn.Dropout(p=0.15, inplace=True)
+        self.dense3 = nn.Linear(self.doc_sz, 1)
 
         self.avg = AverageEmbedding()
 
@@ -129,15 +133,15 @@ class DVProjectionHead_ActiFirst(nn.Module):
         # dv = [batch, seq_len, 768]
 
         kno_dv_proj = self.proj1( self.drop1( self.ln1(kno_dv) ) )
-        kno_dv_proj = torch.tanh(kno_dv_proj)
+        kno_dv_proj = F.gelu(kno_dv_proj)
         unk_dv_proj = self.proj1( self.drop1( self.ln1(unk_dv) ) )
-        unk_dv_proj = torch.tanh(unk_dv_proj)
+        unk_dv_proj = F.gelu(unk_dv_proj)
         # dv_proj = [batch, seq_len, 12]
 
         kno_dv_proj = self.densep( self.dropp( self.lnp(kno_dv_proj) ) )
-        kno_dv_proj = torch.tanh(kno_dv_proj)  # [batch, seq_len, 12]
+        kno_dv_proj = F.gelu(kno_dv_proj)  # [batch, seq_len, 12]
         unk_dv_proj = self.densep( self.dropp( self.lnp(unk_dv_proj) ) )
-        unk_dv_proj = torch.tanh(unk_dv_proj)  # [batch, seq_len, 12]
+        unk_dv_proj = F.gelu(unk_dv_proj)  # [batch, seq_len, 12]
 
         # along seq_len dim
         kno_dv_proj = self.avg(kno_dv_proj, kno_mask)  # [batch, 12]
@@ -148,7 +152,73 @@ class DVProjectionHead_ActiFirst(nn.Module):
         hidden = self.dense2( self.drop2( self.ln2(dv_comb) ) )
         hidden = torch.tanh(hidden)  # [batch, 24]
 
-        hidden = self.dense3( self.drop3( self.ln3(dv_comb) ) )  # [batch, 1]
+        hidden = self.dense3( self.drop3( self.ln3(hidden) ) )  # [batch, 1]
+
+        return hidden
+
+class DVProjectionHead_EmbActi(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+        self.hid_sz = 32
+        self.tok_feat_sz = 64
+        self.doc_feat_sz = 32
+
+        self.dvln1 = nn.BatchNorm1d(126)
+        self.dvdrop1 = nn.Dropout(p=0.5, inplace=True)
+        self.dvproj1 = nn.Linear(768, self.hid_sz)
+
+        self.embln1 = nn.BatchNorm1d(126)
+        self.embdrop1 = nn.Dropout(p=0.5, inplace=True)
+        self.embproj1 = nn.Linear(768, self.hid_sz)
+
+        self.tfln = nn.BatchNorm1d(126)
+        self.tfdrop = nn.Dropout(p=0.1, inplace=True)
+        self.tfdense = nn.Linear(self.hid_sz*2, self.tok_feat_sz)
+
+        self.ln2 = nn.BatchNorm1d(self.tok_feat_sz*2)
+        self.drop2 = nn.Dropout(p=0.1, inplace=True)
+        self.dense2 = nn.Linear(self.tok_feat_sz*2, self.doc_feat_sz)
+
+        self.ln3 = nn.BatchNorm1d(self.doc_feat_sz)
+        self.drop3 = nn.Dropout(p=0.1, inplace=True)
+        self.dense3 = nn.Linear(self.doc_feat_sz, 1)
+
+        self.avg = AverageEmbedding()
+
+    def forward(self, kno_emb, kno_dv, kno_mask, unk_emb, unk_dv, unk_mask):
+        # dv = [batch, seq_len, 768]
+
+        kno_dv_proj = self.dvproj1( self.dvdrop1( self.dvln1(kno_dv) ) )
+        kno_dv_proj = torch.tanh(kno_dv_proj)
+        unk_dv_proj = self.dvproj1( self.dvdrop1( self.dvln1(unk_dv) ) )
+        unk_dv_proj = torch.tanh(unk_dv_proj)
+        # dv_proj = [batch, seq_len, 12]
+
+        kno_proj = self.embproj1( self.embdrop1( self.embln1(kno_emb) ) )
+        kno_proj = torch.tanh(kno_proj)
+        unk_proj = self.embproj1( self.embdrop1( self.embln1(unk_emb) ) )
+        unk_proj = torch.tanh(unk_proj)
+        # emb proj = [batch, seq_len, 12]
+
+        kno_comb = torch.cat((kno_dv_proj, kno_proj), dim=2)
+        unk_comb = torch.cat((unk_dv_proj, unk_proj), dim=2)
+
+        kno_dv_proj = self.tfdense( self.tfdrop( self.tfln(kno_comb) ) )
+        kno_dv_proj = F.gelu(kno_dv_proj)  # [batch, seq_len, 12]
+        unk_dv_proj = self.tfdense( self.tfdrop( self.tfln(unk_comb) ) )
+        unk_dv_proj = F.gelu(unk_dv_proj)  # [batch, seq_len, 12]
+
+        # along seq_len dim
+        kno_dv_proj = self.avg(kno_dv_proj, kno_mask)  # [batch, 64]
+        unk_dv_proj = self.avg(unk_dv_proj, unk_mask)  # [batch, 64]
+
+        dv_comb = torch.cat((kno_dv_proj, unk_dv_proj), dim=1) # [batch, 128]
+
+        hidden = self.dense2( self.drop2( self.ln2(dv_comb) ) )
+        hidden = F.gelu(hidden)  # [batch, 24]
+
+        hidden = self.dense3( self.drop3( self.ln3(hidden) ) )  # [batch, 1]
 
         return hidden
 
@@ -172,6 +242,7 @@ class AverageEmbedding(torch.nn.Module):
 
         return embedding
 
+
 # %%
 class LightningLongformerCLS(pl.LightningModule):
     def __init__(self, config):
@@ -188,6 +259,7 @@ class LightningLongformerCLS(pl.LightningModule):
 
         # self.proj_head = DVProjectionHead()
         self.proj_head = DVProjectionHead_ActiFirst()
+        # self.proj_head = DVProjectionHead_EmbActi()
 
         self.tkz = RobertaTokenizer.from_pretrained("roberta-base")
         self.collator = TokenizerCollate(self.tkz)
@@ -199,11 +271,22 @@ class LightningLongformerCLS(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.train_config["learning_rate"])
-
+        # scheduler = transformers.get_cosine_with_hard_restarts_schedule_with_warmup(optimizer,
+        #                                                                             num_warmup_steps=20,
+        #                                                                             num_training_steps=5000,
+        #                                                                             num_cycles=10)
+        # schedulers = [    
+        # {
+        #  'scheduler': scheduler,
+        #  'interval': 'step',
+        #  'frequency': 1
+        # }]
+        # return [optimizer], schedulers
         return optimizer
 
     def train_dataloader(self):
-        self.dataset_train = PANDataset('./data_pickle_cutcombo/pan_14e_cls/train_essays_kucombo_only.pickle')
+        # self.dataset_train = PANDataset('./data_pickle_cutcombo/pan_all_cls/train_kucombo_only.pickle')
+        self.dataset_train = PANDataset('./data_pickle_cutcombo/pan_14e_cls/train_essays.pickle')
         # self.dataset_train = PANDataset('./data_pickle_cutcombo/pan_14n_cls/train_novels_kucombo_only.pickle')
         self.loader_train = DataLoader(self.dataset_train,
                                         batch_size=self.train_config["batch_size"],
@@ -232,7 +315,7 @@ class LightningLongformerCLS(pl.LightningModule):
                                         pin_memory=True, drop_last=False, shuffle=False)
         return self.loader_test
     
-#     @autocast()
+    @autocast()
     def forward(self, inputs, onedoc_enc=False):
         def one_doc_embed(input_ids, input_mask, mask_n=1):
             uniq_mask = []
@@ -289,6 +372,8 @@ class LightningLongformerCLS(pl.LightningModule):
             unk_dv = unk_pred - unk_embed
 
             logits = self.proj_head(kno_dv, kno_mask[:,1:-1], unk_dv, unk_mask[:,1:-1])
+            # logits = self.proj_head(kno_embed, kno_dv, kno_mask[:,1:-1], 
+                                    # unk_embed, unk_dv, unk_mask[:,1:-1])
 
             logits = torch.squeeze(logits)
             labels = labels.float()
@@ -303,7 +388,8 @@ class LightningLongformerCLS(pl.LightningModule):
         
         self.log("train_loss", loss)
         self.log("logits mean", logits.mean())
-        
+        self.log("LR", self.trainer.optimizers[0].param_groups[0]['lr'] )
+
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -340,7 +426,7 @@ if __name__ == "__main__":
 
     pl.seed_everything(42)
 
-    wandb_logger = WandbLogger(name='pan14e_ActiFirst',project='AVDV')
+    wandb_logger = WandbLogger(name='pan14e_gelu_projFirst',project='AVDV')
     wandb_save(wandb_logger, train_config)
 
     model = LightningLongformerCLS(train_config)
@@ -349,10 +435,9 @@ if __name__ == "__main__":
     cp_valloss = ModelCheckpoint(save_top_k=5, monitor='val_loss', mode='min')
     trainer = pl.Trainer(max_epochs=train_config["epochs"],
                         # accumulate_grad_batches=train_config["accumulate_grad_batches"],
-                        accumulate_grad_batches=1,
                         gradient_clip_val=train_config["gradient_clip_val"],
 
-                        gpus=[0],
+                        gpus=[2],
                         num_nodes=1,
                         # accelerator='ddp',
 
