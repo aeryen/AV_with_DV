@@ -107,9 +107,9 @@ class DVProjectionHead_ActiFirst(nn.Module):
 
     def __init__(self):
         super().__init__()
-        self.proj_sz = 24
-        self.act_sz = 24
-        self.doc_sz = 24
+        self.proj_sz = 12
+        self.act_sz = 12
+        self.doc_sz = 12
 
         self.ln1 = nn.BatchNorm1d(126)
         self.drop1 = nn.Dropout(p=0.5, inplace=True)
@@ -258,8 +258,8 @@ class LightningLongformerCLS(pl.LightningModule):
         self.enc_model = self.pred_model.embeddings.word_embeddings
 
         # self.proj_head = DVProjectionHead()
-        self.proj_head = DVProjectionHead_ActiFirst()
-        # self.proj_head = DVProjectionHead_EmbActi()
+        # self.proj_head = DVProjectionHead_ActiFirst()
+        self.proj_head = DVProjectionHead_EmbActi()
 
         self.tkz = RobertaTokenizer.from_pretrained("roberta-base")
         self.collator = TokenizerCollate(self.tkz)
@@ -271,12 +271,22 @@ class LightningLongformerCLS(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.train_config["learning_rate"])
-        return optimizer
+        scheduler = transformers.get_cosine_with_hard_restarts_schedule_with_warmup(optimizer,
+                                                                                    num_warmup_steps=10,
+                                                                                    num_training_steps=5000,
+                                                                                    num_cycles=10)
+        schedulers = [    
+        {
+         'scheduler': scheduler,
+         'interval': 'step',
+         'frequency': 1
+        }]
+        return [optimizer], schedulers
 
     def train_dataloader(self):
         # self.dataset_train = PANDataset('./data_pickle_cutcombo/pan_all_cls/train_kucombo_only.pickle')
-        self.dataset_train = PANDataset('./data_pickle_cutcombo/pan_14e_cls/train_essays.pickle')
-        # self.dataset_train = PANDataset('./data_pickle_cutcombo/pan_14n_cls/train_novels_kucombo_only.pickle')
+        # self.dataset_train = PANDataset('./data_pickle_cutcombo/pan_14e_cls/train_essays.pickle')
+        self.dataset_train = PANDataset('./data_pickle_cutcombo/pan_14n_cls/train_novels_kucombo_only.pickle')
         self.loader_train = DataLoader(self.dataset_train,
                                         batch_size=self.train_config["batch_size"],
                                         collate_fn=self.collator,
@@ -285,8 +295,8 @@ class LightningLongformerCLS(pl.LightningModule):
         return self.loader_train
 
     def val_dataloader(self):
-        self.dataset_val = PANDataset('./data_pickle_cutcombo/pan_14e_cls/test02_essays_onecut.pickle')
-        # self.dataset_val = PANDataset('./data_pickle_cutcombo/pan_14n_cls/test02_novels_onecut.pickle')
+        # self.dataset_val = PANDataset('./data_pickle_cutcombo/pan_14e_cls/test02_essays_onecut.pickle')
+        self.dataset_val = PANDataset('./data_pickle_cutcombo/pan_14n_cls/test02_novels_onecut.pickle')
         self.loader_val = DataLoader(self.dataset_val,
                                         batch_size=self.train_config["batch_size"],
                                         collate_fn=self.collator,
@@ -295,8 +305,8 @@ class LightningLongformerCLS(pl.LightningModule):
         return self.loader_val
 
     def test_dataloader(self):
-        self.dataset_test = PANDataset('./data_pickle_cutcombo/pan_14e_cls/test02_essays_onecut.pickle')
-        # self.dataset_test = PANDataset('./data_pickle_cutcombo/pan_14n_cls/test02_novels_onecut.pickle')
+        # self.dataset_test = PANDataset('./data_pickle_cutcombo/pan_14e_cls/test02_essays_onecut.pickle')
+        self.dataset_test = PANDataset('./data_pickle_cutcombo/pan_14n_cls/test02_novels_onecut.pickle')
         self.loader_test = DataLoader(self.dataset_test,
                                         batch_size=self.train_config["batch_size"],
                                         collate_fn=self.collator,
@@ -360,9 +370,9 @@ class LightningLongformerCLS(pl.LightningModule):
             kno_dv = kno_pred - kno_embed
             unk_dv = unk_pred - unk_embed
 
-            logits = self.proj_head(kno_dv, kno_mask[:,1:-1], unk_dv, unk_mask[:,1:-1])
-            # logits = self.proj_head(kno_embed, kno_dv, kno_mask[:,1:-1], 
-                                    # unk_embed, unk_dv, unk_mask[:,1:-1])
+            # logits = self.proj_head(kno_dv, kno_mask[:,1:-1], unk_dv, unk_mask[:,1:-1])
+            logits = self.proj_head(kno_embed, kno_dv, kno_mask[:,1:-1], 
+                                    unk_embed, unk_dv, unk_mask[:,1:-1])
 
             logits = torch.squeeze(logits)
             labels = labels.float()
@@ -407,26 +417,26 @@ def wandb_save(wandb_logger, train_config):
 if __name__ == "__main__":
     train_config = {}
     train_config["cache_dir"] = "./cache/"
-    train_config["epochs"] = 10
+    train_config["epochs"] = 14
     train_config["batch_size"] = 256
     # train_config["accumulate_grad_batches"] = 12
     train_config["gradient_clip_val"] = 1.5
-    train_config["learning_rate"] = 5e-5
+    train_config["learning_rate"] = 1e-4
 
     pl.seed_everything(42)
 
-    wandb_logger = WandbLogger(name='pan14e_gelu_projFirst',project='AVDV')
+    wandb_logger = WandbLogger(name='pan14e_emb+dv_24-24-24_tanh',project='AVDV_PAN14N')
     wandb_save(wandb_logger, train_config)
 
-    # model = LightningLongformerCLS(train_config)
-    model = LightningLongformerCLS.load_from_checkpoint("AVDV/10lzwg3i/checkpoints/epoch=8-step=1511.ckpt", config=train_config)
+    model = LightningLongformerCLS(train_config)
+    # model = LightningLongformerCLS.load_from_checkpoint("AVDV/10lzwg3i/checkpoints/epoch=8-step=1511.ckpt", config=train_config)
     
     cp_valloss = ModelCheckpoint(save_top_k=5, monitor='val_loss', mode='min')
     trainer = pl.Trainer(max_epochs=train_config["epochs"],
                         # accumulate_grad_batches=train_config["accumulate_grad_batches"],
                         gradient_clip_val=train_config["gradient_clip_val"],
 
-                        gpus=[5],
+                        gpus=[4],
                         num_nodes=1,
                         # accelerator='ddp',
 

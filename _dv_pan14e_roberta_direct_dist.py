@@ -17,7 +17,7 @@ from tqdm import tqdm
 # %%
 train_config = {}
 train_config["cache_dir"] = "./cache/"
-train_config["gpu_id"] = "cuda:1"
+train_config["gpu_id"] = "cuda:2"
 
 # %%
 tokenizer = RobertaTokenizer.from_pretrained("roberta-base")
@@ -55,28 +55,44 @@ for i in range(1, len(encoded_text["input_ids"])-1):
 # %%
 def one_doc_embed(enc_model, pred_model, input_ids, input_mask, mask_n=1):
     with torch.no_grad():
-        embed = enc_model(input_ids).detach()  # remove start and end symbol
+        uniq_mask = []
+        uniq_input, inverse_indices = torch.unique( input_ids, return_inverse=True, dim=0 )
+        invi = inverse_indices.detach().cpu().numpy()
+        for i in range( uniq_input.shape[0] ):
+            first_index = np.where(invi == i)[0][0]
+            uniq_mask.append(input_mask[first_index,:])
+
+        input_ids = uniq_input
+        input_mask = torch.stack(uniq_mask, dim=0)
+
+        embed = enc_model(input_ids)
 
         result_embed = []
         result_pred = []
-        for i in range(1, len(encoded_text["input_ids"])-mask_n):
-            masked_ids = input_ids.clone()
-            masked_ids[0,i:(i+mask_n)] = tokenizer.mask_token_id
+        # skip start and end symbol
+        masked_ids = input_ids.clone()
+        for i in range(1, input_ids.shape[1]-mask_n):
+            masked_ids[:,i:(i+mask_n)] = tokenizer.mask_token_id
 
             output = pred_model(input_ids=masked_ids, attention_mask=input_mask, return_dict=False)[0]
+            result_embed.append( embed[:, i:(i+mask_n), :] )
+            result_pred.append( output[:, i:(i+mask_n), :] )
 
-            embed_vec = torch.mean( embed[0, i:(i+mask_n), :] , dim=0)
-            result_embed.append( embed_vec )
-            pred_vec = torch.mean( output[0, i:(i+mask_n), :].detach(), dim=0)
-            result_pred.append( pred_vec )
+            masked_ids[:,i:(i+mask_n)] = input_ids[:,i:(i+mask_n)]
 
-        result_embed = torch.stack(result_embed, dim=0)
-        result_pred = torch.stack(result_pred, dim=0)
-        return {"e": result_embed, "p": result_pred}
+        # stack along doc_len
+        result_embed = torch.cat(result_embed, dim=1)
+        result_pred = torch.cat(result_pred, dim=1)
 
-# %%
-df_test02 = pd.read_pickle('./data_pickle_cutcombo/pan_14e_cls/test02_essays.pickle')
-df_test02
+        rec_embed = []
+        rec_pred = []
+        for i in invi:
+            rec_embed.append(result_embed[i,:,:])
+            rec_pred.append(result_pred[i,:,:])
+
+        rec_embed = torch.stack(rec_embed, dim=0)
+        rec_pred = torch.stack(rec_pred, dim=0)    
+    return {"e": rec_embed, "p": rec_pred}
 
 # %%
 df_test02 = pd.read_pickle('./data_pickle_cutcombo/pan_14n_cls/test02_novels_cutlist.pickle')
@@ -86,17 +102,22 @@ df_test02
 result_list = []
 for i in tqdm(range(len(df_test02))):
 # for i in tqdm(range(10)):
-    encoded_text = tokenizer(df_test02.iloc[i,1][0])
-    input_mask = torch.tensor([encoded_text["attention_mask"]]).to(train_config["gpu_id"])
-    input_ids = torch.tensor([encoded_text["input_ids"]]).to(train_config["gpu_id"])
-    k_result = one_doc_embed( enco_model, pred_model, input_ids, input_mask, mask_n=5 )
+    # k_result = []
+    # for j in range(len( df_test02.iloc[i,1] )):
+    encoded_text = tokenizer(df_test02.iloc[i,1], truncation=True, padding="max_length", max_length=128)
+    input_mask = torch.tensor(encoded_text["attention_mask"], dtype=torch.int64).to(train_config["gpu_id"])
+    input_ids = torch.tensor(encoded_text["input_ids"], dtype=torch.int64).to(train_config["gpu_id"])
+    k_result = one_doc_embed( enco_model, pred_model, input_ids, input_mask, mask_n=1 )
 
-    encoded_text = tokenizer(df_test02.iloc[i,2][0])
-    input_mask = torch.tensor([encoded_text["attention_mask"]]).to(train_config["gpu_id"])
-    input_ids = torch.tensor([encoded_text["input_ids"]]).to(train_config["gpu_id"])
-    u_result = one_doc_embed( enco_model, pred_model, input_ids, input_mask, mask_n=5 )
+    # u_result = []
+    # for j in range(len( df_test02.iloc[i,2] )):
+    encoded_text = tokenizer(df_test02.iloc[i,2], truncation=True, padding="max_length", max_length=128)
+    input_mask = torch.tensor(encoded_text["attention_mask"], dtype=torch.int64).to(train_config["gpu_id"])
+    input_ids = torch.tensor(encoded_text["input_ids"], dtype=torch.int64).to(train_config["gpu_id"])
+    u_result = one_doc_embed( enco_model, pred_model, input_ids, input_mask, mask_n=1 )
 
-    result_list.append({"k": k_result, "u": u_result})
+    l = df_test02.iloc[i,0]=="Y"
+    result_list.append({"l": l, "k": k_result, "u": u_result})
 
 # %%
 result = []

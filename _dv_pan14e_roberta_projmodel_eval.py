@@ -29,13 +29,17 @@ def eval_model_onecut(model, test_dl):
     with torch.no_grad():
         loss, logits, outputs = model(batch)
 
-    pred = (logits > logits.median()).cpu().numpy()
     truth = batch[0].cpu().numpy()
 
+    pred = (logits > logits.median()).cpu().numpy()
     acc = np.sum( pred == truth ) / len(truth)
     print(acc)
 
-    return acc, logits.cpu().numpy(), truth
+    pred = (logits > 0).cpu().numpy()
+    acc = np.sum( pred == truth ) / len(truth)
+    print(acc)
+
+    return logits.cpu().numpy(), truth
 
 
 # %%
@@ -44,9 +48,11 @@ def eval_model_onecut(model, test_dl):
 
 # good emb+dv
 # model = LightningLongformerCLS.load_from_checkpoint("AVDV/3tbf9ol3/checkpoints/epoch=0-step=329.ckpt", config=train_config)
+model = LightningLongformerCLS.load_from_checkpoint("AVDV/10lzwg3i/checkpoints/epoch=9-step=1679.ckpt", config=train_config)
 
 # good acti
-model = LightningLongformerCLS.load_from_checkpoint("AVDV/26liqdv3/checkpoints/epoch=3-step=1319.ckpt", config=train_config)
+# model = LightningLongformerCLS.load_from_checkpoint("AVDV/26liqdv3/checkpoints/epoch=3-step=1319.ckpt", config=train_config)
+# model = LightningLongformerCLS.load_from_checkpoint("AVDV/26liqdv3/checkpoints/epoch=4-step=1649.ckpt", config=train_config)
 
 
 # %%
@@ -58,7 +64,7 @@ dl_14e = DataLoader(dataset_14e,
                         batch_size=256,
                         collate_fn=TokenizerCollate(tkz),
                         num_workers=0, drop_last=False, shuffle=False)
-acc, logits, truth = eval_model_onecut(model, dl_14e)
+logits, truth = eval_model_onecut(model, dl_14e)
 
 # %%
 dataset_14n = PANDataset('./data_pickle_cutcombo/pan_14n_cls/test02_novels_onecut.pickle')
@@ -66,7 +72,7 @@ dl_14n = DataLoader(dataset_14n,
                         batch_size=256,
                         collate_fn=TokenizerCollate(tkz),
                         num_workers=0, drop_last=False, shuffle=False)
-acc = eval_model_onecut(model, dl_14n)
+logits, truth = eval_model_onecut(model, dl_14n)
 
 # %%
 def eval_model_wholedoc_ACTI(model, test_dl):
@@ -82,15 +88,15 @@ def eval_model_wholedoc_ACTI(model, test_dl):
             unk_pred, unk_emb, unk_dv = model( (unk_ids, unk_mask) , onedoc_enc=True)
 
             kno_dv_proj = model.proj_head.proj1( model.proj_head.drop1( model.proj_head.ln1(kno_dv) ) )
-            kno_dv_proj = F.gelu(kno_dv_proj)
+            kno_dv_proj = torch.tanh(kno_dv_proj)
             unk_dv_proj = model.proj_head.proj1( model.proj_head.drop1( model.proj_head.ln1(unk_dv) ) )
-            unk_dv_proj = F.gelu(unk_dv_proj)
+            unk_dv_proj = torch.tanh(unk_dv_proj)
             # dv_proj = [batch, seq_len, 12]
 
             kno_dv_proj = model.proj_head.densep( model.proj_head.dropp( model.proj_head.lnp(kno_dv_proj) ) )
-            kno_dv_proj = F.gelu(kno_dv_proj)  # [batch, seq_len, 12]
+            kno_dv_proj = torch.tanh(kno_dv_proj)  # [batch, seq_len, 12]
             unk_dv_proj = model.proj_head.densep( model.proj_head.dropp( model.proj_head.lnp(unk_dv_proj) ) )
-            unk_dv_proj = F.gelu(unk_dv_proj)  # [batch, seq_len, 12]
+            unk_dv_proj = torch.tanh(unk_dv_proj)  # [batch, seq_len, 12]
 
             kno_dv_doc = []
             kno_mask_doc = []
@@ -119,6 +125,19 @@ def eval_model_wholedoc_ACTI(model, test_dl):
             hidden = model.proj_head.dense3 (model.proj_head.drop3( model.proj_head.ln3(hidden) ) )  # [batch, 1]
 
             result.append( hidden.item() )
+
+    result = np.array(result)
+    truth = ( dataset.df.iloc[:,0] == "Y" ).to_numpy()
+
+    print("")
+    pred = result > np.median(result)
+    acc = np.sum( pred == truth ) / len(truth)
+    print(acc)
+
+    pred = result > 0
+    acc = np.sum( pred == truth ) / len(truth)
+    print(acc)
+    return result, acc
 
 def eval_model_wholedoc_EMBDV(model, test_dl):
     result = []
@@ -172,7 +191,7 @@ def eval_model_wholedoc_EMBDV(model, test_dl):
             dv_comb = torch.cat((kno_dv_proj, unk_dv_proj), dim=1) # [batch, 24]
 
             hidden = model.proj_head.dense2( model.proj_head.drop2( model.proj_head.ln2(dv_comb) ) )
-            hidden = torch.tanh(hidden)  # [batch, 24]
+            hidden = F.gelu(hidden)  # [batch, 24]
 
             hidden = model.proj_head.dense3 (model.proj_head.drop3( model.proj_head.ln3(hidden) ) )  # [batch, 1]
 
@@ -203,8 +222,9 @@ def eval_model_cutdist(model, test_dl):
             # print(unk_dv.shape[0])
             for i in range(kno_dv.shape[0]):
                 for j in range(unk_dv.shape[0]):
-                    logit = model.proj_head( kno_embed[i:i+1,:,:], kno_dv[i:i+1,:,:], kno_mask[i:i+1,1:-1],
-                                             unk_embed[j:j+1,:,:], unk_dv[j:j+1,:,:], unk_mask[j:j+1,1:-1] )
+                    # logit = model.proj_head( kno_embed[i:i+1,:,:], kno_dv[i:i+1,:,:], kno_mask[i:i+1,1:-1],
+                                            #  unk_embed[j:j+1,:,:], unk_dv[j:j+1,:,:], unk_mask[j:j+1,1:-1] )
+                    logit = model.proj_head( kno_dv[i:i+1,:,:], kno_mask[i:i+1,1:-1], unk_dv[j:j+1,:,:], unk_mask[j:j+1,1:-1] )
                     dist_val.append(logit.item())
             
             result.append(dist_val)
@@ -255,15 +275,21 @@ fig = sns.distplot(neg_dist, kde=False, rug=True, hist=True, bins=20,  kde_kws={
 # %%
 dist_val = []
 for i in range( len( dataset.df ) ):
-    dist_val.append( np.max(result[i]) )
+    dist_val.append( np.mean(result[i]) )
 
 dist_val = np.array(dist_val)
-pred = dist_val > np.max( dist_val )
+pred = dist_val > np.mean( dist_val )
 
 truth = ( dataset.df.iloc[:,0] == "Y" ).to_numpy()
 acc = np.sum( pred == truth ) / len(truth)
 print(acc)
 # %%
+
+# %%
+pred, acc = eval_model_wholedoc_ACTI(model, dl_14e)
+
+# %%
+acc
 
 # %%
 pred, acc = eval_model_wholedoc_EMBDV(model, dl_14e)
