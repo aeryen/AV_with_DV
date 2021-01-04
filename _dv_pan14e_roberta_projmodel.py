@@ -107,24 +107,24 @@ class DVProjectionHead_ActiFirst(nn.Module):
 
     def __init__(self):
         super().__init__()
-        self.proj_sz = 64
-        self.act_sz = 64
-        self.doc_sz = 32
+        self.proj_sz = 24
+        self.act_sz = 24
+        self.doc_sz = 24
 
         self.ln1 = nn.BatchNorm1d(126)
         self.drop1 = nn.Dropout(p=0.5, inplace=True)
         self.proj1 = nn.Linear(768, self.proj_sz)
 
         self.lnp = nn.BatchNorm1d(126)
-        self.dropp = nn.Dropout(p=0.15, inplace=True)
+        self.dropp = nn.Dropout(p=0.1, inplace=True)
         self.densep = nn.Linear(self.proj_sz, self.act_sz)
 
         self.ln2 = nn.BatchNorm1d(self.act_sz*2)
-        self.drop2 = nn.Dropout(p=0.15, inplace=True)
+        self.drop2 = nn.Dropout(p=0.1, inplace=True)
         self.dense2 = nn.Linear(self.act_sz*2, self.doc_sz)
 
         self.ln3 = nn.BatchNorm1d(self.doc_sz)
-        self.drop3 = nn.Dropout(p=0.15, inplace=True)
+        self.drop3 = nn.Dropout(p=0.1, inplace=True)
         self.dense3 = nn.Linear(self.doc_sz, 1)
 
         self.avg = AverageEmbedding()
@@ -133,15 +133,15 @@ class DVProjectionHead_ActiFirst(nn.Module):
         # dv = [batch, seq_len, 768]
 
         kno_dv_proj = self.proj1( self.drop1( self.ln1(kno_dv) ) )
-        kno_dv_proj = F.gelu(kno_dv_proj)
+        kno_dv_proj = torch.tanh(kno_dv_proj)
         unk_dv_proj = self.proj1( self.drop1( self.ln1(unk_dv) ) )
-        unk_dv_proj = F.gelu(unk_dv_proj)
+        unk_dv_proj = torch.tanh(unk_dv_proj)
         # dv_proj = [batch, seq_len, 12]
 
         kno_dv_proj = self.densep( self.dropp( self.lnp(kno_dv_proj) ) )
-        kno_dv_proj = F.gelu(kno_dv_proj)  # [batch, seq_len, 12]
+        kno_dv_proj = torch.tanh(kno_dv_proj)  # [batch, seq_len, 12]
         unk_dv_proj = self.densep( self.dropp( self.lnp(unk_dv_proj) ) )
-        unk_dv_proj = F.gelu(unk_dv_proj)  # [batch, seq_len, 12]
+        unk_dv_proj = torch.tanh(unk_dv_proj)  # [batch, seq_len, 12]
 
         # along seq_len dim
         kno_dv_proj = self.avg(kno_dv_proj, kno_mask)  # [batch, 12]
@@ -271,17 +271,6 @@ class LightningLongformerCLS(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.train_config["learning_rate"])
-        # scheduler = transformers.get_cosine_with_hard_restarts_schedule_with_warmup(optimizer,
-        #                                                                             num_warmup_steps=20,
-        #                                                                             num_training_steps=5000,
-        #                                                                             num_cycles=10)
-        # schedulers = [    
-        # {
-        #  'scheduler': scheduler,
-        #  'interval': 'step',
-        #  'frequency': 1
-        # }]
-        # return [optimizer], schedulers
         return optimizer
 
     def train_dataloader(self):
@@ -361,7 +350,7 @@ class LightningLongformerCLS(pl.LightningModule):
             doc_ids, doc_mask = inputs
             doc_embed, doc_pred = one_doc_embed(input_ids=doc_ids, input_mask=doc_mask)
             doc_dv = doc_pred - doc_embed
-            return doc_dv
+            return doc_pred, doc_embed, doc_dv
         else:
             labels, kno_ids, kno_mask, unk_ids, unk_mask = inputs
 
@@ -412,7 +401,7 @@ class LightningLongformerCLS(pl.LightningModule):
 @rank_zero_only
 def wandb_save(wandb_logger, train_config):
     wandb_logger.log_hyperparams(train_config)
-    wandb_logger.experiment.save('./_dv_pan14e_roberta_projmodel.py')
+    wandb_logger.experiment.save('./_dv_pan14e_roberta_projmodel.py', policy="now")
 
 # %%
 if __name__ == "__main__":
@@ -429,15 +418,15 @@ if __name__ == "__main__":
     wandb_logger = WandbLogger(name='pan14e_gelu_projFirst',project='AVDV')
     wandb_save(wandb_logger, train_config)
 
-    model = LightningLongformerCLS(train_config)
-    # model = LightningLongformerCLS.load_from_checkpoint("./AVDV/143ui570/checkpoints/epoch=5-step=1979.ckpt", config=train_config)
+    # model = LightningLongformerCLS(train_config)
+    model = LightningLongformerCLS.load_from_checkpoint("AVDV/10lzwg3i/checkpoints/epoch=8-step=1511.ckpt", config=train_config)
     
     cp_valloss = ModelCheckpoint(save_top_k=5, monitor='val_loss', mode='min')
     trainer = pl.Trainer(max_epochs=train_config["epochs"],
                         # accumulate_grad_batches=train_config["accumulate_grad_batches"],
                         gradient_clip_val=train_config["gradient_clip_val"],
 
-                        gpus=[2],
+                        gpus=[5],
                         num_nodes=1,
                         # accelerator='ddp',
 
