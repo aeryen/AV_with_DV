@@ -123,10 +123,42 @@ for item in result_list:
     item["u"]["p"] = item["u"]["p"].detach().cpu()
 
 # %%
-torch.save( result_list, "./data_pickle_cutcombo/pan_14n_cls/test02_temp_KUEP.pt" )
+torch.save( result_list, "./data_pickle_cutcombo/pan_14n_cls/test02_temp2_KUEP.pt" )
 
 # %%
-result_list = torch.load("./data_pickle_cutcombo/pan_14n_cls/test02_temp_KUEP.pt" )
+result_list1 = torch.load("./data_pickle_cutcombo/pan_14n_cls/test02_temp_KUEP.pt" )
+result_list2 = torch.load("./data_pickle_cutcombo/pan_14n_cls/test02_temp2_KUEP.pt" )
+
+# %%
+result_all = result_list1
+result_all.extend( result_list2 )
+
+# %%
+result_new = []
+for i in tqdm(range(len(result_all))):
+    encoded_text = tokenizer(df_test02.iloc[i,1], truncation=True, padding="max_length", max_length=128)
+    input_ids = torch.tensor(encoded_text["input_ids"], dtype=torch.int64)
+    input_mask = torch.tensor(encoded_text["attention_mask"], dtype=torch.int64)
+    k_result = {}
+    k_result["e"] = result_all[i]["k"]["e"].cpu()
+    k_result["p"] = result_all[i]["k"]["p"].cpu()
+    k_result["input_ids"] = input_ids.cpu()
+    k_result["input_mask"] = input_mask.cpu()
+
+    encoded_text = tokenizer(df_test02.iloc[i,2], truncation=True, padding="max_length", max_length=128)
+    input_ids = torch.tensor(encoded_text["input_ids"], dtype=torch.int64)
+    input_mask = torch.tensor(encoded_text["attention_mask"], dtype=torch.int64)
+    u_result = {}
+    u_result["e"] = result_all[i]["u"]["e"].cpu()
+    u_result["p"] = result_all[i]["u"]["p"].cpu()
+    u_result["input_ids"] = input_ids.cpu()
+    u_result["input_mask"] = input_mask.cpu()
+
+    l = result_all[i]["l"]
+    result_new.append({"l": l, "k": k_result, "u": u_result})
+
+# %%
+torch.save( result_new, "./data_pickle_cutcombo/pan_14n_cls/test02_KUEP.pt" )
 
 # %%
 result = []

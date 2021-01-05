@@ -96,24 +96,24 @@ def make_all_combo_KUEP(inlist):
         for i in range(kno["input_ids"].shape[0]-1):
             for j in range(i+1, kno["input_ids"].shape[0]):
                 if random() <= 0.25:
-                    k_item = { "input_ids":kno["input_ids"][i,:], "input_mask":kno["input_ids"][i,:],
+                    k_item = { "input_ids":kno["input_ids"][i,:], "input_mask":kno["input_mask"][i,:],
                            "e":kno["e"][i,:,:], "p":kno["p"][i,:,:] }
-                    u_item = { "input_ids":kno["input_ids"][j,:], "input_mask":kno["input_ids"][j,:],
+                    u_item = { "input_ids":kno["input_ids"][j,:], "input_mask":kno["input_mask"][j,:],
                             "e":kno["e"][j,:,:], "p":kno["p"][j,:,:] }
                     result_list.append( {"l":True, "k":k_item, "u":u_item, "prob_index":irow} )
                 if random() <= 0.25:
-                    k_item = { "input_ids":kno["input_ids"][i,:], "input_mask":kno["input_ids"][i,:],
+                    k_item = { "input_ids":kno["input_ids"][i,:], "input_mask":kno["input_mask"][i,:],
                            "e":kno["e"][i,:,:], "p":kno["p"][i,:,:] }
-                    u_item = { "input_ids":kno["input_ids"][j,:], "input_mask":kno["input_ids"][j,:],
+                    u_item = { "input_ids":kno["input_ids"][j,:], "input_mask":kno["input_mask"][j,:],
                             "e":kno["e"][j,:,:], "p":kno["p"][j,:,:] }
                     result_list.append( {"l":True, "k":u_item, "u":k_item, "prob_index":irow} )
 
         # all known-unknown combo
         for i in range(kno["input_ids"].shape[0]):
             for j in range(unk["input_ids"].shape[0]):
-                k_item = { "input_ids":kno["input_ids"][i,:], "input_mask":kno["input_ids"][i,:],
+                k_item = { "input_ids":kno["input_ids"][i,:], "input_mask":kno["input_mask"][i,:],
                            "e":kno["e"][i,:,:], "p":kno["p"][i,:,:] }
-                u_item = { "input_ids":unk["input_ids"][j,:], "input_mask":unk["input_ids"][j,:],
+                u_item = { "input_ids":unk["input_ids"][j,:], "input_mask":unk["input_mask"][j,:],
                            "e":unk["e"][j,:,:], "p":unk["p"][j,:,:] }
                 result_list.append( {"l":l, "k":k_item, "u":u_item, "prob_index":irow} )
 

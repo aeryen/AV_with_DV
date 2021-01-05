@@ -27,33 +27,44 @@ from pytorch_lightning.utilities.distributed import rank_zero_only
 from pytorch_lightning.metrics.classification import Accuracy, F1
 
 #%%
-class PANDataset(Dataset):
+class PANDatasetKUEP(Dataset):
 
     def __init__(self, df_path):
-        self.df = pd.read_pickle(df_path)
+        self.df = torch.load(df_path)
 
     def __len__(self):
         return len(self.df)
 
     def __getitem__(self, idx):
-        # return (self.df.iloc[idx,0], self.df.iloc[idx,1][0], self.df.iloc[idx,2])
-        return (self.df.iloc[idx,0], self.df.iloc[idx,1], self.df.iloc[idx,2])
+        return (self.df[idx]["l"], self.df[idx]["k"], self.df[idx]["u"])
 
-class TokenizerCollate:
-    def __init__(self, tkz):
-        self.tkz = tkz
+class TokenizerCollateKUEP:
     
     def __call__(self, batch):
         batch_split = list(zip(*batch))
         labels, known, unknown = batch_split[0], batch_split[1], batch_split[2]
-        labels = np.array(labels) == "Y"
-        encode_kno = self.tkz(list(known), truncation=True, padding="max_length", max_length=128)
-        encode_unk = self.tkz(list(unknown), truncation=True, padding="max_length", max_length=128)
+        labels = np.array(labels)
+
+        kno_ids = torch.stack( [k["input_ids"] for k in known] )
+        kno_mask = torch.stack( [k["input_mask"] for k in known] )
+        kno_e = torch.stack( [k["e"] for k in known] )
+        kno_p = torch.stack( [k["p"] for k in known] )
+
+        unk_ids = torch.stack( [k["input_ids"] for k in unknown] )
+        unk_mask = torch.stack( [k["input_mask"] for k in unknown] )
+        unk_e = torch.stack( [k["e"] for k in unknown] )
+        unk_p = torch.stack( [k["p"] for k in unknown] )
         return torch.tensor(labels), \
-                torch.tensor(encode_kno["input_ids"], dtype=torch.int64), \
-                torch.tensor(encode_kno["attention_mask"], dtype=torch.int64), \
-                torch.tensor(encode_unk["input_ids"], dtype=torch.int64), \
-                torch.tensor(encode_unk["attention_mask"], dtype=torch.int64)
+                kno_ids, kno_mask, kno_e, kno_p, \
+                unk_ids, unk_mask, unk_e, unk_p
+
+# %%
+dataset_train = PANDatasetKUEP("./data_pickle_cutcombo/pan_13_cls/train_KUEP_combo.pt")
+loader_train = DataLoader(dataset_train,
+                                batch_size=4,
+                                collate_fn=TokenizerCollateKUEP(),
+                                num_workers=1,
+                                pin_memory=True, drop_last=False, shuffle=False)
 
 
 # %%
