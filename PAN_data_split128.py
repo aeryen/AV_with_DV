@@ -286,6 +286,7 @@ result = make_KUEP(enco_model, pred_model, tokenizer, df, "cuda:0")
 torch.save( result, "./data_pickle_cutcombo/pan_13_cls/train_KUEP.pt" )
 
 # %%
+result = torch.load( "./data_pickle_cutcombo/pan_13_cls/train_KUEP.pt" )
 result_combo = make_all_combo_KUEP(result)
 torch.save( result_combo, "./data_pickle_cutcombo/pan_13_cls/train_KUEP_combo.pt" )
 
@@ -294,10 +295,6 @@ df = pd.read_pickle('./data_pickle_cutcombo/pan_13_cls/test2_cutlist.pickle')
 model, enco_model, pred_model, tokenizer = make_model_and_tok("cuda:0")
 result = make_KUEP(enco_model, pred_model, tokenizer, df, "cuda:0")
 torch.save( result, "./data_pickle_cutcombo/pan_13_cls/test2_KUEP.pt" )
-
-# %%
-result_combo = make_all_combo_KUEP(result)
-torch.save( result_combo, "./data_pickle_cutcombo/pan_13_cls/test2_KUEP_combo.pt" )
 
 # %%
 def make_2014e():
@@ -336,6 +333,23 @@ def make_2014e():
 
 # %%
 traindf, testdf = make_2014e()
+
+# %%
+df = pd.read_pickle('./data_pickle_cutcombo/pan_14e_cls/train_cutlist.pickle')
+model, enco_model, pred_model, tokenizer = make_model_and_tok("cuda:0")
+result = make_KUEP(enco_model, pred_model, tokenizer, df, "cuda:0")
+torch.save( result, "./data_pickle_cutcombo/pan_14e_cls/train_KUEP.pt" )
+
+# %%
+result = torch.load( "./data_pickle_cutcombo/pan_14e_cls/train_KUEP.pt" )
+result_combo = make_all_combo_KUEP(result)
+torch.save( result_combo, "./data_pickle_cutcombo/pan_14e_cls/train_KUEP_combo.pt" )
+
+# %%
+df = pd.read_pickle('./data_pickle_cutcombo/pan_14e_cls/test02_essays_cutlist.pickle')
+model, enco_model, pred_model, tokenizer = make_model_and_tok("cuda:0")
+result = make_KUEP(enco_model, pred_model, tokenizer, df, "cuda:0")
+torch.save( result, "./data_pickle_cutcombo/pan_14e_cls/test02_essays_KUEP.pt" )
 
 # %%
 def make_2014n():
@@ -381,6 +395,7 @@ result = make_KUEP(enco_model, pred_model, tokenizer, df, "cuda:0")
 torch.save( result, "./data_pickle_cutcombo/pan_14n_cls/train_KUEP.pt" )
 
 # %%
+result = torch.load( "./data_pickle_cutcombo/pan_14n_cls/train_KUEP.pt" )
 result_combo = make_all_combo_KUEP(result)
 torch.save( result_combo, "./data_pickle_cutcombo/pan_14n_cls/train_KUEP_combo170k.pt" )
 
@@ -420,6 +435,7 @@ result = make_KUEP(enco_model, pred_model, tokenizer, df, "cuda:0")
 torch.save( result, "./data_pickle_cutcombo/pan_15_cls/train_KUEP.pt" )
 
 # %%
+result = torch.load( "./data_pickle_cutcombo/pan_15_cls/train_KUEP.pt" )
 result_combo = make_all_combo_KUEP(result)
 torch.save( result_combo, "./data_pickle_cutcombo/pan_15_cls/train_KUEP_combo.pt" )
 
@@ -428,6 +444,8 @@ df = pd.read_pickle('./data_pickle_cutcombo/pan_15_cls/test_cutlist.pickle')
 model, enco_model, pred_model, tokenizer = make_model_and_tok("cuda:0")
 result = make_KUEP(enco_model, pred_model, tokenizer, df, "cuda:0")
 torch.save( result, "./data_pickle_cutcombo/pan_15_cls/test_KUEP.pt" )
+
+# %%
 
 # %%
 def make_all():

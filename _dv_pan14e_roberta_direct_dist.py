@@ -126,12 +126,7 @@ for item in result_list:
 torch.save( result_list, "./data_pickle_cutcombo/pan_14n_cls/test02_temp2_KUEP.pt" )
 
 # %%
-result_list1 = torch.load("./data_pickle_cutcombo/pan_14n_cls/test02_temp_KUEP.pt" )
-result_list2 = torch.load("./data_pickle_cutcombo/pan_14n_cls/test02_temp2_KUEP.pt" )
-
-# %%
-result_all = result_list1
-result_all.extend( result_list2 )
+result_all = torch.load("./data_pickle_cutcombo/pan_14n_cls/test02_temp_KUEP.pt" )
 
 # %%
 result_new = []

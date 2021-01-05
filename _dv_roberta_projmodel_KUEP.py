@@ -29,14 +29,29 @@ from pytorch_lightning.metrics.classification import Accuracy, F1
 #%%
 class PANDatasetKUEP(Dataset):
 
-    def __init__(self, df_path):
+    def __init__(self, df_path, test_1cut=False):
         self.df = torch.load(df_path)
+        self.test_1cut = test_1cut
 
     def __len__(self):
         return len(self.df)
 
     def __getitem__(self, idx):
-        return (self.df[idx]["l"], self.df[idx]["k"], self.df[idx]["u"])
+        if not self.test_1cut:
+            return (self.df[idx]["l"], self.df[idx]["k"], self.df[idx]["u"])
+        else:
+            l = self.df[idx]["l"]
+            kno = {}
+            kno["input_ids"] = self.df[idx]["k"]["input_ids"][0,:]
+            kno["input_mask"] = self.df[idx]["k"]["input_mask"][0,:]
+            kno["e"] = self.df[idx]["k"]["e"][0,:,:]
+            kno["p"] = self.df[idx]["k"]["p"][0,:,:]
+            unk = {}
+            unk["input_ids"] = self.df[idx]["u"]["input_ids"][0,:]
+            unk["input_mask"] = self.df[idx]["u"]["input_mask"][0,:]
+            unk["e"] = self.df[idx]["u"]["e"][0,:,:]
+            unk["p"] = self.df[idx]["u"]["p"][0,:,:]
+            return l, kno, unk
 
 class TokenizerCollateKUEP:
     
@@ -59,121 +74,13 @@ class TokenizerCollateKUEP:
                 unk_ids, unk_mask, unk_e, unk_p
 
 # %%
-dataset_train = PANDatasetKUEP("./data_pickle_cutcombo/pan_13_cls/train_KUEP_combo.pt")
-loader_train = DataLoader(dataset_train,
-                                batch_size=4,
-                                collate_fn=TokenizerCollateKUEP(),
-                                num_workers=1,
-                                pin_memory=True, drop_last=False, shuffle=False)
-
-
-# %%
-class DVProjectionHead(nn.Module):
-
-    def __init__(self):
-        super().__init__()
-        self.hid_sz = 12
-        self.ln1 = nn.BatchNorm1d(126)
-        self.drop1 = nn.Dropout(p=0.5, inplace=True)
-        self.proj1 = nn.Linear(768, self.hid_sz)
-
-        self.ln2 = nn.BatchNorm1d(self.hid_sz*2)
-        self.drop2 = nn.Dropout(p=0.1, inplace=True)
-        self.dense2 = nn.Linear(self.hid_sz*2, self.hid_sz*2)
-
-        self.ln3 = nn.BatchNorm1d(self.hid_sz*2)
-        self.drop3 = nn.Dropout(p=0.1, inplace=True)
-        self.dense3 = nn.Linear(self.hid_sz*2, 1)
-
-        # self.bias = nn.Parameter( torch.zeros([1]) )
-
-        self.avg = AverageEmbedding()
-
-    def forward(self, kno_dv, kno_mask, unk_dv, unk_mask):
-        # dv = [batch, seq_len, 768]
-
-        kno_dv_proj = self.proj1( self.drop1( self.ln1(kno_dv) ) )
-        unk_dv_proj = self.proj1( self.drop1( self.ln1(unk_dv) ) )
-        # dv_proj = [batch, seq_len, 12]
-        
-        # along seq_len dim
-        kno_dv_proj = self.avg(kno_dv_proj, kno_mask)
-        unk_dv_proj = self.avg(unk_dv_proj, unk_mask)
-        # kno_dv_proj = [batch, 12]
-        
-        # method 3, real NN
-        dv_comb = torch.cat((kno_dv_proj, unk_dv_proj), dim=1) # [batch, 24]
-        dv_comb = torch.tanh(dv_comb)
-
-        hidden = self.drop2( self.ln2(dv_comb) )
-        hidden = self.dense2(hidden)
-        hidden = torch.tanh(hidden)  # [batch, 24]
-
-        hidden = self.drop3( self.ln3(hidden) )
-        hidden = self.dense3(hidden)  # [batch, 1]
-
-        return hidden
-
-class DVProjectionHead_ActiFirst(nn.Module):
-
-    def __init__(self):
-        super().__init__()
-        self.proj_sz = 12
-        self.act_sz = 12
-        self.doc_sz = 12
-
-        self.ln1 = nn.BatchNorm1d(126)
-        self.drop1 = nn.Dropout(p=0.5, inplace=True)
-        self.proj1 = nn.Linear(768, self.proj_sz)
-
-        self.lnp = nn.BatchNorm1d(126)
-        self.dropp = nn.Dropout(p=0.1, inplace=True)
-        self.densep = nn.Linear(self.proj_sz, self.act_sz)
-
-        self.ln2 = nn.BatchNorm1d(self.act_sz*2)
-        self.drop2 = nn.Dropout(p=0.1, inplace=True)
-        self.dense2 = nn.Linear(self.act_sz*2, self.doc_sz)
-
-        self.ln3 = nn.BatchNorm1d(self.doc_sz)
-        self.drop3 = nn.Dropout(p=0.1, inplace=True)
-        self.dense3 = nn.Linear(self.doc_sz, 1)
-
-        self.avg = AverageEmbedding()
-
-    def forward(self, kno_dv, kno_mask, unk_dv, unk_mask):
-        # dv = [batch, seq_len, 768]
-
-        kno_dv_proj = self.proj1( self.drop1( self.ln1(kno_dv) ) )
-        kno_dv_proj = torch.tanh(kno_dv_proj)
-        unk_dv_proj = self.proj1( self.drop1( self.ln1(unk_dv) ) )
-        unk_dv_proj = torch.tanh(unk_dv_proj)
-        # dv_proj = [batch, seq_len, 12]
-
-        kno_dv_proj = self.densep( self.dropp( self.lnp(kno_dv_proj) ) )
-        kno_dv_proj = torch.tanh(kno_dv_proj)  # [batch, seq_len, 12]
-        unk_dv_proj = self.densep( self.dropp( self.lnp(unk_dv_proj) ) )
-        unk_dv_proj = torch.tanh(unk_dv_proj)  # [batch, seq_len, 12]
-
-        # along seq_len dim
-        kno_dv_proj = self.avg(kno_dv_proj, kno_mask)  # [batch, 12]
-        unk_dv_proj = self.avg(unk_dv_proj, unk_mask)  # [batch, 12]
-
-        dv_comb = torch.cat((kno_dv_proj, unk_dv_proj), dim=1) # [batch, 24]
-
-        hidden = self.dense2( self.drop2( self.ln2(dv_comb) ) )
-        hidden = torch.tanh(hidden)  # [batch, 24]
-
-        hidden = self.dense3( self.drop3( self.ln3(hidden) ) )  # [batch, 1]
-
-        return hidden
-
 class DVProjectionHead_EmbActi(nn.Module):
 
     def __init__(self):
         super().__init__()
-        self.hid_sz = 32
-        self.tok_feat_sz = 64
-        self.doc_feat_sz = 32
+        self.hid_sz = 12
+        self.tok_feat_sz = 24
+        self.doc_feat_sz = 24
 
         self.dvln1 = nn.BatchNorm1d(126)
         self.dvdrop1 = nn.Dropout(p=0.5, inplace=True)
@@ -216,9 +123,9 @@ class DVProjectionHead_EmbActi(nn.Module):
         unk_comb = torch.cat((unk_dv_proj, unk_proj), dim=2)
 
         kno_dv_proj = self.tfdense( self.tfdrop( self.tfln(kno_comb) ) )
-        kno_dv_proj = F.gelu(kno_dv_proj)  # [batch, seq_len, 12]
+        kno_dv_proj = torch.tanh(kno_dv_proj)  # [batch, seq_len, 12]
         unk_dv_proj = self.tfdense( self.tfdrop( self.tfln(unk_comb) ) )
-        unk_dv_proj = F.gelu(unk_dv_proj)  # [batch, seq_len, 12]
+        unk_dv_proj = torch.tanh(unk_dv_proj)  # [batch, seq_len, 12]
 
         # along seq_len dim
         kno_dv_proj = self.avg(kno_dv_proj, kno_mask)  # [batch, 64]
@@ -227,7 +134,7 @@ class DVProjectionHead_EmbActi(nn.Module):
         dv_comb = torch.cat((kno_dv_proj, unk_dv_proj), dim=1) # [batch, 128]
 
         hidden = self.dense2( self.drop2( self.ln2(dv_comb) ) )
-        hidden = F.gelu(hidden)  # [batch, 24]
+        hidden = torch.tanh(hidden)  # [batch, 24]
 
         hidden = self.dense3( self.drop3( self.ln3(hidden) ) )  # [batch, 1]
 
@@ -267,13 +174,7 @@ class LightningLongformerCLS(pl.LightningModule):
         
         self.pred_model = self.roberta.roberta
         self.enc_model = self.pred_model.embeddings.word_embeddings
-
-        # self.proj_head = DVProjectionHead()
-        # self.proj_head = DVProjectionHead_ActiFirst()
         self.proj_head = DVProjectionHead_EmbActi()
-
-        self.tkz = RobertaTokenizer.from_pretrained("roberta-base")
-        self.collator = TokenizerCollate(self.tkz)
 
         self.lossfunc = nn.BCEWithLogitsLoss()
 
@@ -295,106 +196,55 @@ class LightningLongformerCLS(pl.LightningModule):
         return [optimizer], schedulers
 
     def train_dataloader(self):
-        # self.dataset_train = PANDataset('./data_pickle_cutcombo/pan_all_cls/train_kucombo_only.pickle')
-        # self.dataset_train = PANDataset('./data_pickle_cutcombo/pan_14e_cls/train_essays.pickle')
-        self.dataset_train = PANDataset('./data_pickle_cutcombo/pan_14n_cls/train_novels_kucombo_only.pickle')
+        self.dataset_train = PANDatasetKUEP("data_pickle_cutcombo/pan_14n_cls/train_KUEP_combo170k.pt")
         self.loader_train = DataLoader(self.dataset_train,
                                         batch_size=self.train_config["batch_size"],
-                                        collate_fn=self.collator,
-                                        num_workers=4,
-                                        pin_memory=True, drop_last=False, shuffle=False)
+                                        collate_fn=TokenizerCollateKUEP(),
+                                        num_workers=1,
+                                        pin_memory=True, drop_last=False, shuffle=True)
         return self.loader_train
 
     def val_dataloader(self):
-        # self.dataset_val = PANDataset('./data_pickle_cutcombo/pan_14e_cls/test02_essays_onecut.pickle')
-        self.dataset_val = PANDataset('./data_pickle_cutcombo/pan_14n_cls/test02_novels_onecut.pickle')
+        self.dataset_val = PANDatasetKUEP("data_pickle_cutcombo/pan_14n_cls/test02_KUEP.pt",
+                                         test_1cut=True)
         self.loader_val = DataLoader(self.dataset_val,
                                         batch_size=self.train_config["batch_size"],
-                                        collate_fn=self.collator,
-                                        num_workers=4,
+                                        collate_fn=TokenizerCollateKUEP(),
+                                        num_workers=1,
                                         pin_memory=True, drop_last=False, shuffle=False)
         return self.loader_val
 
     def test_dataloader(self):
-        # self.dataset_test = PANDataset('./data_pickle_cutcombo/pan_14e_cls/test02_essays_onecut.pickle')
-        self.dataset_test = PANDataset('./data_pickle_cutcombo/pan_14n_cls/test02_novels_onecut.pickle')
+        self.dataset_test = PANDatasetKUEP("data_pickle_cutcombo/pan_14n_cls/test02_KUEP.pt",
+                                         test_1cut=True)
         self.loader_test = DataLoader(self.dataset_test,
                                         batch_size=self.train_config["batch_size"],
-                                        collate_fn=self.collator,
-                                        num_workers=4,
+                                        collate_fn=TokenizerCollateKUEP(),
+                                        num_workers=1,
                                         pin_memory=True, drop_last=False, shuffle=False)
         return self.loader_test
     
     @autocast()
-    def forward(self, inputs, onedoc_enc=False):
-        def one_doc_embed(input_ids, input_mask, mask_n=1):
-            uniq_mask = []
-            uniq_input, inverse_indices = torch.unique( input_ids, return_inverse=True, dim=0 )
-            invi = inverse_indices.detach().cpu().numpy()
-            for i in range( uniq_input.shape[0] ):
-                first_index = np.where(invi == i)[0][0]
-                uniq_mask.append(input_mask[first_index,:])
+    def forward(self, inputs):
+        labels, kno_ids, kno_mask, kno_embed, kno_pred, \
+                unk_ids, unk_mask, unk_embed, unk_pred = inputs
+        kno_dv = kno_pred - kno_embed
+        unk_dv = unk_pred - unk_embed
 
-            input_ids = uniq_input
-            input_mask = torch.stack(uniq_mask, dim=0)
+        logits = self.proj_head(kno_embed, kno_dv, kno_mask[:,1:-1], 
+                                unk_embed, unk_dv, unk_mask[:,1:-1])
 
-            embed = self.enc_model(input_ids)
+        logits = torch.squeeze(logits)
+        labels = labels.float()
+        loss = self.lossfunc(logits, labels)
 
-            result_embed = []
-            result_pred = []
-            # skip start and end symbol
-            masked_ids = input_ids.clone()
-            for i in range(1, input_ids.shape[1]-mask_n):
-                masked_ids[:,i:(i+mask_n)] = self.tkz.mask_token_id
-
-                output = self.pred_model(input_ids=masked_ids, attention_mask=input_mask, return_dict=False)[0]
-                result_embed.append( embed[:, i:(i+mask_n), :] )
-                result_pred.append( output[:, i:(i+mask_n), :] )
-
-                masked_ids[:,i:(i+mask_n)] = input_ids[:,i:(i+mask_n)]
-
-            # stack along doc_len
-            result_embed = torch.cat(result_embed, dim=1)
-            result_pred = torch.cat(result_pred, dim=1)
-
-            rec_embed = []
-            rec_pred = []
-            for i in invi:
-                rec_embed.append(result_embed[i,:,:])
-                rec_pred.append(result_pred[i,:,:])
-
-            rec_embed = torch.stack(rec_embed, dim=0)
-            rec_pred = torch.stack(rec_pred, dim=0)
-            return rec_embed, rec_pred
-
-        if onedoc_enc:
-            doc_ids, doc_mask = inputs
-            doc_embed, doc_pred = one_doc_embed(input_ids=doc_ids, input_mask=doc_mask)
-            doc_dv = doc_pred - doc_embed
-            return doc_pred, doc_embed, doc_dv
-        else:
-            labels, kno_ids, kno_mask, unk_ids, unk_mask = inputs
-
-            kno_embed, kno_pred = one_doc_embed(input_ids=kno_ids, input_mask=kno_mask)
-            unk_embed, unk_pred = one_doc_embed(input_ids=unk_ids, input_mask=unk_mask)
-
-            kno_dv = kno_pred - kno_embed
-            unk_dv = unk_pred - unk_embed
-
-            # logits = self.proj_head(kno_dv, kno_mask[:,1:-1], unk_dv, unk_mask[:,1:-1])
-            logits = self.proj_head(kno_embed, kno_dv, kno_mask[:,1:-1], 
-                                    unk_embed, unk_dv, unk_mask[:,1:-1])
-
-            logits = torch.squeeze(logits)
-            labels = labels.float()
-            loss = self.lossfunc(logits, labels)
-
-            return (loss, logits, (kno_embed, kno_pred, unk_embed, unk_pred))
+        return (loss, logits, (kno_embed, kno_pred, unk_embed, unk_pred))
     
     def training_step(self, batch, batch_idx):
-        labels, kno_ids, kno_mask, unk_ids, unk_mask  = batch
+        labels, kno_ids, kno_mask, kno_embed, kno_pred, \
+                unk_ids, unk_mask, unk_embed, unk_pred  = batch
         
-        loss, logits, outputs = self( (labels, kno_ids, kno_mask, unk_ids, unk_mask) )
+        loss, logits, outputs = self( batch )
         
         self.log("train_loss", loss)
         self.log("logits mean", logits.mean())
@@ -403,9 +253,10 @@ class LightningLongformerCLS(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        labels, kno_ids, kno_mask, unk_ids, unk_mask  = batch
+        labels, kno_ids, kno_mask, kno_embed, kno_pred, \
+                unk_ids, unk_mask, unk_embed, unk_pred  = batch
         
-        loss, logits, outputs = self( (labels, kno_ids, kno_mask, unk_ids, unk_mask) )
+        loss, logits, outputs = self( batch )
         
         self.acc(logits, labels.float())
         self.f1(logits, labels.float())
@@ -422,7 +273,7 @@ class LightningLongformerCLS(pl.LightningModule):
 @rank_zero_only
 def wandb_save(wandb_logger, train_config):
     wandb_logger.log_hyperparams(train_config)
-    wandb_logger.experiment.save('./_dv_pan14e_roberta_projmodel.py', policy="now")
+    wandb_logger.experiment.save('_dv_roberta_projmodel_KUEP.py', policy="now")
 
 # %%
 if __name__ == "__main__":
@@ -436,18 +287,18 @@ if __name__ == "__main__":
 
     pl.seed_everything(42)
 
-    wandb_logger = WandbLogger(name='pan14e_emb+dv_24-24-24_tanh',project='AVDV_PAN14N')
+    wandb_logger = WandbLogger(name='PAN14N_emb+dv_12-24-24_tanh_fromPAN14e',project='AVDV_PAN14N')
     wandb_save(wandb_logger, train_config)
 
-    model = LightningLongformerCLS(train_config)
-    # model = LightningLongformerCLS.load_from_checkpoint("AVDV/10lzwg3i/checkpoints/epoch=8-step=1511.ckpt", config=train_config)
+    # model = LightningLongformerCLS(train_config)
+    model = LightningLongformerCLS.load_from_checkpoint("AVDV/2npel9bz/checkpoints/epoch=7-step=2639.ckpt", config=train_config)
     
     cp_valloss = ModelCheckpoint(save_top_k=5, monitor='val_loss', mode='min')
     trainer = pl.Trainer(max_epochs=train_config["epochs"],
                         # accumulate_grad_batches=train_config["accumulate_grad_batches"],
                         gradient_clip_val=train_config["gradient_clip_val"],
 
-                        gpus=[4],
+                        gpus=[5],
                         num_nodes=1,
                         # accelerator='ddp',
 
