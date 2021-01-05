@@ -92,7 +92,7 @@ def one_doc_embed(enc_model, pred_model, input_ids, input_mask, mask_n=1):
 
         rec_embed = torch.stack(rec_embed, dim=0)
         rec_pred = torch.stack(rec_pred, dim=0)    
-    return {"e": rec_embed, "p": rec_pred}
+    return {"e": rec_embed.detach().cpu(), "p": rec_pred.detach().cpu()}
 
 # %%
 df_test02 = pd.read_pickle('./data_pickle_cutcombo/pan_14n_cls/test02_novels_cutlist.pickle')
@@ -100,17 +100,13 @@ df_test02
 
 # %%
 result_list = []
-for i in tqdm(range(len(df_test02))):
+for i in tqdm(range(109, len(df_test02))):
 # for i in tqdm(range(10)):
-    # k_result = []
-    # for j in range(len( df_test02.iloc[i,1] )):
     encoded_text = tokenizer(df_test02.iloc[i,1], truncation=True, padding="max_length", max_length=128)
     input_mask = torch.tensor(encoded_text["attention_mask"], dtype=torch.int64).to(train_config["gpu_id"])
     input_ids = torch.tensor(encoded_text["input_ids"], dtype=torch.int64).to(train_config["gpu_id"])
     k_result = one_doc_embed( enco_model, pred_model, input_ids, input_mask, mask_n=1 )
 
-    # u_result = []
-    # for j in range(len( df_test02.iloc[i,2] )):
     encoded_text = tokenizer(df_test02.iloc[i,2], truncation=True, padding="max_length", max_length=128)
     input_mask = torch.tensor(encoded_text["attention_mask"], dtype=torch.int64).to(train_config["gpu_id"])
     input_ids = torch.tensor(encoded_text["input_ids"], dtype=torch.int64).to(train_config["gpu_id"])
@@ -118,6 +114,19 @@ for i in tqdm(range(len(df_test02))):
 
     l = df_test02.iloc[i,0]=="Y"
     result_list.append({"l": l, "k": k_result, "u": u_result})
+
+# %%
+for item in result_list:
+    item["k"]["e"] = item["k"]["e"].detach().cpu()
+    item["k"]["p"] = item["k"]["p"].detach().cpu()
+    item["u"]["e"] = item["u"]["e"].detach().cpu()
+    item["u"]["p"] = item["u"]["p"].detach().cpu()
+
+# %%
+torch.save( result_list, "./data_pickle_cutcombo/pan_14n_cls/test02_temp_KUEP.pt" )
+
+# %%
+result_list = torch.load("./data_pickle_cutcombo/pan_14n_cls/test02_temp_KUEP.pt" )
 
 # %%
 result = []

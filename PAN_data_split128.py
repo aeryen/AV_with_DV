@@ -93,20 +93,20 @@ def make_all_combo_KUEP(inlist):
             neg_kno += kno["input_ids"].shape[0]
             neg_unk += unk["input_ids"].shape[0]
 
-        # for i in range(kno["input_ids"].shape[0]-1):
-        #     for j in range(i+1, kno["input_ids"].shape[0]):
-        #         if random() <= 0.25:
-        #             k_item = { "input_ids":kno["input_ids"][i,:], "input_mask":kno["input_ids"][i,:],
-        #                    "e":kno["e"][i,:,:], "p":kno["p"][i,:,:] }
-        #             u_item = { "input_ids":kno["input_ids"][j,:], "input_mask":kno["input_ids"][j,:],
-        #                     "e":kno["e"][j,:,:], "p":kno["p"][j,:,:] }
-        #             result_list.append( {"l":True, "k":k_item, "u":u_item, "prob_index":irow} )
-        #         if random() <= 0.25:
-        #             k_item = { "input_ids":kno["input_ids"][i,:], "input_mask":kno["input_ids"][i,:],
-        #                    "e":kno["e"][i,:,:], "p":kno["p"][i,:,:] }
-        #             u_item = { "input_ids":kno["input_ids"][j,:], "input_mask":kno["input_ids"][j,:],
-        #                     "e":kno["e"][j,:,:], "p":kno["p"][j,:,:] }
-        #             result_list.append( {"l":True, "k":u_item, "u":k_item, "prob_index":irow} )
+        for i in range(kno["input_ids"].shape[0]-1):
+            for j in range(i+1, kno["input_ids"].shape[0]):
+                if random() <= 0.25:
+                    k_item = { "input_ids":kno["input_ids"][i,:], "input_mask":kno["input_ids"][i,:],
+                           "e":kno["e"][i,:,:], "p":kno["p"][i,:,:] }
+                    u_item = { "input_ids":kno["input_ids"][j,:], "input_mask":kno["input_ids"][j,:],
+                            "e":kno["e"][j,:,:], "p":kno["p"][j,:,:] }
+                    result_list.append( {"l":True, "k":k_item, "u":u_item, "prob_index":irow} )
+                if random() <= 0.25:
+                    k_item = { "input_ids":kno["input_ids"][i,:], "input_mask":kno["input_ids"][i,:],
+                           "e":kno["e"][i,:,:], "p":kno["p"][i,:,:] }
+                    u_item = { "input_ids":kno["input_ids"][j,:], "input_mask":kno["input_ids"][j,:],
+                            "e":kno["e"][j,:,:], "p":kno["p"][j,:,:] }
+                    result_list.append( {"l":True, "k":u_item, "u":k_item, "prob_index":irow} )
 
         # all known-unknown combo
         for i in range(kno["input_ids"].shape[0]):
@@ -280,6 +280,26 @@ def make_2013():
 traindf, testdf = make_2013()
 
 # %%
+df = pd.read_pickle('./data_pickle_cutcombo/pan_13_cls/train_cutlist.pickle')
+model, enco_model, pred_model, tokenizer = make_model_and_tok("cuda:0")
+result = make_KUEP(enco_model, pred_model, tokenizer, df, "cuda:0")
+torch.save( result, "./data_pickle_cutcombo/pan_13_cls/train_KUEP.pt" )
+
+# %%
+result_combo = make_all_combo_KUEP(result)
+torch.save( result_combo, "./data_pickle_cutcombo/pan_13_cls/train_KUEP_combo.pt" )
+
+# %%
+df = pd.read_pickle('./data_pickle_cutcombo/pan_13_cls/test2_cutlist.pickle')
+model, enco_model, pred_model, tokenizer = make_model_and_tok("cuda:0")
+result = make_KUEP(enco_model, pred_model, tokenizer, df, "cuda:0")
+torch.save( result, "./data_pickle_cutcombo/pan_13_cls/test2_KUEP.pt" )
+
+# %%
+result_combo = make_all_combo_KUEP(result)
+torch.save( result_combo, "./data_pickle_cutcombo/pan_13_cls/test2_KUEP_combo.pt" )
+
+# %%
 def make_2014e():
     PATH_CLS = Path('./data_pickle_cutcombo/pan_14e_cls/')
     PATH_CLS.mkdir(exist_ok=True)
@@ -358,9 +378,6 @@ train_df, test2_df = make_2014n()
 df = pd.read_pickle('./data_pickle_cutcombo/pan_14n_cls/train_cutlist.pickle')
 model, enco_model, pred_model, tokenizer = make_model_and_tok("cuda:0")
 result = make_KUEP(enco_model, pred_model, tokenizer, df, "cuda:0")
-pickle.dump( result, open( "./data_pickle_cutcombo/pan_14n_cls/train_KUEP.pickle", "wb" ) )
-
-# %%
 torch.save( result, "./data_pickle_cutcombo/pan_14n_cls/train_KUEP.pt" )
 
 # %%
@@ -395,6 +412,22 @@ def make_2015():
     return train_df, test_df
 # %%
 train_df, test_df = make_2015()
+
+# %%
+df = pd.read_pickle('./data_pickle_cutcombo/pan_15_cls/train_cutlist.pickle')
+model, enco_model, pred_model, tokenizer = make_model_and_tok("cuda:0")
+result = make_KUEP(enco_model, pred_model, tokenizer, df, "cuda:0")
+torch.save( result, "./data_pickle_cutcombo/pan_15_cls/train_KUEP.pt" )
+
+# %%
+result_combo = make_all_combo_KUEP(result)
+torch.save( result_combo, "./data_pickle_cutcombo/pan_15_cls/train_KUEP_combo.pt" )
+
+# %%
+df = pd.read_pickle('./data_pickle_cutcombo/pan_15_cls/test_cutlist.pickle')
+model, enco_model, pred_model, tokenizer = make_model_and_tok("cuda:0")
+result = make_KUEP(enco_model, pred_model, tokenizer, df, "cuda:0")
+torch.save( result, "./data_pickle_cutcombo/pan_15_cls/test_KUEP.pt" )
 
 # %%
 def make_all():
