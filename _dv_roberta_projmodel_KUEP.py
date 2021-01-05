@@ -83,23 +83,23 @@ class DVProjectionHead_EmbActi(nn.Module):
         self.doc_feat_sz = 24
 
         self.dvln1 = nn.BatchNorm1d(126)
-        self.dvdrop1 = nn.Dropout(p=0.5, inplace=True)
+        self.dvdrop1 = nn.Dropout(p=0.6, inplace=True)
         self.dvproj1 = nn.Linear(768, self.hid_sz)
 
         self.embln1 = nn.BatchNorm1d(126)
-        self.embdrop1 = nn.Dropout(p=0.5, inplace=True)
+        self.embdrop1 = nn.Dropout(p=0.6, inplace=True)
         self.embproj1 = nn.Linear(768, self.hid_sz)
 
         self.tfln = nn.BatchNorm1d(126)
-        self.tfdrop = nn.Dropout(p=0.1, inplace=True)
+        self.tfdrop = nn.Dropout(p=0.2, inplace=True)
         self.tfdense = nn.Linear(self.hid_sz*2, self.tok_feat_sz)
 
         self.ln2 = nn.BatchNorm1d(self.tok_feat_sz*2)
-        self.drop2 = nn.Dropout(p=0.1, inplace=True)
+        self.drop2 = nn.Dropout(p=0.2, inplace=True)
         self.dense2 = nn.Linear(self.tok_feat_sz*2, self.doc_feat_sz)
 
         self.ln3 = nn.BatchNorm1d(self.doc_feat_sz)
-        self.drop3 = nn.Dropout(p=0.1, inplace=True)
+        self.drop3 = nn.Dropout(p=0.2, inplace=True)
         self.dense3 = nn.Linear(self.doc_feat_sz, 1)
 
         self.avg = AverageEmbedding()
@@ -183,20 +183,24 @@ class LightningLongformerCLS(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.train_config["learning_rate"])
-        scheduler = transformers.get_cosine_with_hard_restarts_schedule_with_warmup(optimizer,
-                                                                                    num_warmup_steps=10,
-                                                                                    num_training_steps=5000,
-                                                                                    num_cycles=10)
-        schedulers = [    
-        {
-         'scheduler': scheduler,
-         'interval': 'step',
-         'frequency': 1
-        }]
-        return [optimizer], schedulers
+        return optimizer
+        # scheduler = transformers.get_cosine_with_hard_restarts_schedule_with_warmup(optimizer,
+        #                                                                             num_warmup_steps=20,
+        #                                                                             num_training_steps=10000,
+        #                                                                             num_cycles=10)
+        # schedulers = [    
+        # {
+        #  'scheduler': scheduler,
+        #  'interval': 'step',
+        #  'frequency': 1
+        # }]
+        # return [optimizer], schedulers
 
     def train_dataloader(self):
-        self.dataset_train = PANDatasetKUEP("data_pickle_cutcombo/pan_14n_cls/train_KUEP_combo170k.pt")
+        self.dataset_train = PANDatasetKUEP("data_pickle_cutcombo/pan_13_cls/train_KUEP_combo.pt")
+        # self.dataset_train = PANDatasetKUEP("data_pickle_cutcombo/pan_14e_cls/train_KUEP_combo.pt")
+        # self.dataset_train = PANDatasetKUEP("data_pickle_cutcombo/pan_14n_cls/train_KUEP_combo110k.pt")
+        # self.dataset_train = PANDatasetKUEP("data_pickle_cutcombo/pan_15_cls/train_KUEP_combo.pt")
         self.loader_train = DataLoader(self.dataset_train,
                                         batch_size=self.train_config["batch_size"],
                                         collate_fn=TokenizerCollateKUEP(),
@@ -205,7 +209,10 @@ class LightningLongformerCLS(pl.LightningModule):
         return self.loader_train
 
     def val_dataloader(self):
-        self.dataset_val = PANDatasetKUEP("data_pickle_cutcombo/pan_14n_cls/test02_KUEP.pt",
+        self.dataset_val = PANDatasetKUEP("data_pickle_cutcombo/pan_13_cls/test02_KUEP.pt",
+        # self.dataset_val = PANDatasetKUEP("data_pickle_cutcombo/pan_14e_cls/test02_essays_KUEP.pt",
+        # self.dataset_val = PANDatasetKUEP("data_pickle_cutcombo/pan_14n_cls/test02_KUEP.pt",
+        # self.dataset_val = PANDatasetKUEP("data_pickle_cutcombo/pan_15_cls/test_KUEP.pt",
                                          test_1cut=True)
         self.loader_val = DataLoader(self.dataset_val,
                                         batch_size=self.train_config["batch_size"],
@@ -213,16 +220,6 @@ class LightningLongformerCLS(pl.LightningModule):
                                         num_workers=1,
                                         pin_memory=True, drop_last=False, shuffle=False)
         return self.loader_val
-
-    def test_dataloader(self):
-        self.dataset_test = PANDatasetKUEP("data_pickle_cutcombo/pan_14n_cls/test02_KUEP.pt",
-                                         test_1cut=True)
-        self.loader_test = DataLoader(self.dataset_test,
-                                        batch_size=self.train_config["batch_size"],
-                                        collate_fn=TokenizerCollateKUEP(),
-                                        num_workers=1,
-                                        pin_memory=True, drop_last=False, shuffle=False)
-        return self.loader_test
     
     @autocast()
     def forward(self, inputs):
@@ -287,11 +284,11 @@ if __name__ == "__main__":
 
     pl.seed_everything(42)
 
-    wandb_logger = WandbLogger(name='PAN14N_emb+dv_12-24-24_tanh_fromPAN14e',project='AVDV_PAN14N')
+    wandb_logger = WandbLogger(name='PAN13_12-24-24_KUEP',project='AVDV_PAN13')
     wandb_save(wandb_logger, train_config)
 
-    # model = LightningLongformerCLS(train_config)
-    model = LightningLongformerCLS.load_from_checkpoint("AVDV/2npel9bz/checkpoints/epoch=7-step=2639.ckpt", config=train_config)
+    model = LightningLongformerCLS(train_config)
+    # model = LightningLongformerCLS.load_from_checkpoint("AVDV/2npel9bz/checkpoints/epoch=7-step=2639.ckpt", config=train_config)
     
     cp_valloss = ModelCheckpoint(save_top_k=5, monitor='val_loss', mode='min')
     trainer = pl.Trainer(max_epochs=train_config["epochs"],
@@ -308,6 +305,7 @@ if __name__ == "__main__":
                         logger=wandb_logger,
                         log_every_n_steps=1,
 
+                        val_check_interval=0.5,
                         limit_val_batches=40,
                         checkpoint_callback=cp_valloss
                         )

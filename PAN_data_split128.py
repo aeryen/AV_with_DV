@@ -93,20 +93,20 @@ def make_all_combo_KUEP(inlist):
             neg_kno += kno["input_ids"].shape[0]
             neg_unk += unk["input_ids"].shape[0]
 
-        for i in range(kno["input_ids"].shape[0]-1):
-            for j in range(i+1, kno["input_ids"].shape[0]):
-                if random() <= 0.25:
-                    k_item = { "input_ids":kno["input_ids"][i,:], "input_mask":kno["input_mask"][i,:],
-                           "e":kno["e"][i,:,:], "p":kno["p"][i,:,:] }
-                    u_item = { "input_ids":kno["input_ids"][j,:], "input_mask":kno["input_mask"][j,:],
-                            "e":kno["e"][j,:,:], "p":kno["p"][j,:,:] }
-                    result_list.append( {"l":True, "k":k_item, "u":u_item, "prob_index":irow} )
-                if random() <= 0.25:
-                    k_item = { "input_ids":kno["input_ids"][i,:], "input_mask":kno["input_mask"][i,:],
-                           "e":kno["e"][i,:,:], "p":kno["p"][i,:,:] }
-                    u_item = { "input_ids":kno["input_ids"][j,:], "input_mask":kno["input_mask"][j,:],
-                            "e":kno["e"][j,:,:], "p":kno["p"][j,:,:] }
-                    result_list.append( {"l":True, "k":u_item, "u":k_item, "prob_index":irow} )
+        # for i in range(kno["input_ids"].shape[0]-1):
+        #     for j in range(i+1, kno["input_ids"].shape[0]):
+        #         if random() <= 0.25:
+        #             k_item = { "input_ids":kno["input_ids"][i,:], "input_mask":kno["input_mask"][i,:],
+        #                    "e":kno["e"][i,:,:], "p":kno["p"][i,:,:] }
+        #             u_item = { "input_ids":kno["input_ids"][j,:], "input_mask":kno["input_mask"][j,:],
+        #                     "e":kno["e"][j,:,:], "p":kno["p"][j,:,:] }
+        #             result_list.append( {"l":True, "k":k_item, "u":u_item, "prob_index":irow} )
+        #         if random() <= 0.25:
+        #             k_item = { "input_ids":kno["input_ids"][i,:], "input_mask":kno["input_mask"][i,:],
+        #                    "e":kno["e"][i,:,:], "p":kno["p"][i,:,:] }
+        #             u_item = { "input_ids":kno["input_ids"][j,:], "input_mask":kno["input_mask"][j,:],
+        #                     "e":kno["e"][j,:,:], "p":kno["p"][j,:,:] }
+        #             result_list.append( {"l":True, "k":u_item, "u":k_item, "prob_index":irow} )
 
         # all known-unknown combo
         for i in range(kno["input_ids"].shape[0]):
@@ -397,7 +397,17 @@ torch.save( result, "./data_pickle_cutcombo/pan_14n_cls/train_KUEP.pt" )
 # %%
 result = torch.load( "./data_pickle_cutcombo/pan_14n_cls/train_KUEP.pt" )
 result_combo = make_all_combo_KUEP(result)
-torch.save( result_combo, "./data_pickle_cutcombo/pan_14n_cls/train_KUEP_combo170k.pt" )
+# %%
+pos = 0
+neg = 0
+for d in result_combo:
+    if d["l"]:
+        pos += 1
+    else:
+        neg += 1
+pos, neg
+# %%
+torch.save( result_combo, "./data_pickle_cutcombo/pan_14n_cls/train_KUEP_combo110k.pt" )
 
 # %%
 def make_2015():
