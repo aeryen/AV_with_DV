@@ -20,7 +20,7 @@ train_config["batch_size"] = 256
 # train_config["accumulate_grad_batches"] = 12
 train_config["gradient_clip_val"] = 1.5
 train_config["learning_rate"] = 1e-5
-train_config["gpu_id"] = "cuda:0"
+train_config["gpu_id"] = "cuda:4"
 
 # %%
 def eval_model_onecut(model, datalist):
@@ -63,7 +63,7 @@ def eval_model_onecut(model, datalist):
     return outputs, truth
 
 
-def eval_model_wholedoc_EMBDV(model, data_list):
+def eval_model_wholedoc_EMBDV(model, data_list, threshold=0.0):
     result = []
     model = model.to(train_config["gpu_id"])
     model = model.eval()
@@ -134,10 +134,10 @@ def eval_model_wholedoc_EMBDV(model, data_list):
     pred_med = result > np.median(result)
     acc = np.sum( pred_med == truth ) / len(truth)
     print(acc)
-    pred_zero = result > 0
+    pred_zero = result > threshold
     acc = np.sum( pred_zero == truth ) / len(truth)
     print(acc)
-    return result, truth, pred_med, pred_zero, acc
+    return result, truth, pred_med, pred_zero
 
 # %%
 def calc_cat1(answers, truth):
@@ -158,6 +158,7 @@ def calc_cat1(answers, truth):
 # PAN14N
 # emb+dv 12 24 24 tanh
 # model = LightningLongformerCLS.load_from_checkpoint("AVDV/2npel9bz/checkpoints/epoch=7-step=2639.ckpt", config=train_config)
+
 # pan14e best2
 # model = LightningLongformerCLS.load_from_checkpoint("AVDV/3jzkwqb5/checkpoints/epoch=0-step=963.ckpt", config=train_config)
 
@@ -165,16 +166,26 @@ def calc_cat1(answers, truth):
 model = LightningLongformerCLS.load_from_checkpoint("AVDV_PAN14N/16erabgu/checkpoints/epoch=10-step=3662.ckpt", config=train_config)
 
 # %%
-datalist = torch.load("data_pickle_cutcombo/pan_14n_cls/test02_KUEP.pt")
+datalist_train = torch.load("data_pickle_cutcombo/pan_14n_cls/train_KUEP.pt")
+datalist_test = torch.load("data_pickle_cutcombo/pan_14n_cls/test02_KUEP.pt")
 
 # %%
-datalist = torch.load("data_pickle_cutcombo/pan_14e_cls/test02_essays_KUEP.pt")
+datalist_train = torch.load("data_pickle_cutcombo/pan_14e_cls/train_KUEP.pt")
+datalist_test = torch.load("data_pickle_cutcombo/pan_14e_cls/test02_essays_KUEP.pt")
 
 # %%
-logits, truth = eval_model_onecut(model, datalist)
+logits, truth = eval_model_onecut(model, datalist_test)
+
 
 # %%
-result, truth, pred_med, pred_zero, acc = eval_model_wholedoc_EMBDV(model, datalist)
+result, truth, pred_med, pred_zero = eval_model_wholedoc_EMBDV(model, datalist_train)
+
+# %%
+m = np.median(result)
+m
+
+# %%
+result, truth, pred_med, pred_zero = eval_model_wholedoc_EMBDV(model, datalist_test, threshold=0)
 
 # %%
 roc_result = roc_auc_score(truth, result)
